@@ -1,0 +1,80 @@
+// Golden tests: TypeScript ports vs real OpenCV 4.9 / scipy 1.13 outputs (tools/omr_golden.py).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { cpythonSetPop, npMean, npSum, wardClusterLabels } from '../src/omr/oemer/pyport';
+import { dilate, ellipseKernel, erode, findContourBoxes, findPeaks, houghLinesP, label4, olsSlope, rectKernel, type Raster } from '../src/omr/oemer/cv';
+
+interface Enc {
+  w: number;
+  h: number;
+  data: string;
+}
+const golden = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'omr', 'golden-primitives.json'), 'utf8'));
+const dec = (e: Enc): Raster => ({ width: e.w, height: e.h, data: Uint8Array.from(e.data, (c) => Number(c)) });
+const str = (r: Raster) => Array.from(r.data).join('');
+
+describe('OpenCV / scipy ports', () => {
+  it('find_peaks matches scipy', () => {
+    for (const c of golden.find_peaks) {
+      expect(findPeaks(c.x, { height: c.height, distance: c.distance, prominence: c.prominence })).toEqual(c.peaks);
+    }
+  });
+
+  it('erode / dilate with rectangular kernels match OpenCV', () => {
+    for (const c of golden.morph_rect) {
+      const img = dec(c.img);
+      const k = rectKernel(c.rows, c.cols);
+      expect(str(erode(img, k))).toBe(c.erode.data);
+      expect(str(dilate(img, k))).toBe(c.dilate.data);
+    }
+  });
+
+  it('ellipse structuring elements match OpenCV', () => {
+    for (const c of golden.ellipse_kernels) {
+      const k = ellipseKernel(c.w, c.h);
+      expect(Array.from(k.data).join(''), `${c.w}x${c.h}`).toBe(c.k.data);
+    }
+  });
+
+  it('ndimage.label matches scipy', () => {
+    for (const c of golden.label) {
+      const r = label4(dec(c.img));
+      expect(r.count).toBe(c.n);
+      expect(Array.from(r.labels)).toEqual(c.labels);
+    }
+  });
+
+  it('findContours bounding boxes match OpenCV (same order)', () => {
+    for (const c of golden.find_contours) {
+      const boxes = findContourBoxes(dec(c.img)).map(([x1, y1, x2, y2]) => [x1, y1, x2 - x1, y2 - y1]);
+      expect(boxes).toEqual(c.boxes);
+    }
+  });
+
+  it('HoughLinesP matches OpenCV', () => {
+    for (const c of golden.hough_lines_p) {
+      expect(houghLinesP(dec(c.img), 1, Math.PI / 180, 50, 10, 20)).toEqual(c.lines);
+    }
+  });
+
+  it('least-squares slope', () => {
+    expect(olsSlope([0, 1, 2, 3], [1, 3, 5, 7])).toBeCloseTo(2);
+    expect(olsSlope([5, 5], [1, 2])).toBe(0);
+  });
+});
+
+describe('Python library behaviour ports', () => {
+  it('AgglomerativeClustering (ward, distance threshold) labels match sklearn', () => {
+    for (const c of golden.agglomerative) expect(wardClusterLabels(c.points, c.threshold)).toEqual(c.labels);
+  });
+  it('set.pop() order matches CPython', () => {
+    for (const c of golden.set_pop) expect(cpythonSetPop(c.vals) ?? null, JSON.stringify(c.vals)).toBe(c.pop);
+  });
+  it('numpy pairwise sums match exactly', () => {
+    for (const c of golden.np_sum) {
+      expect(npSum(c.x)).toBe(c.sum);
+      expect(npMean(c.x)).toBe(c.mean);
+    }
+  });
+});

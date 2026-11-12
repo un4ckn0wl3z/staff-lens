@@ -29,7 +29,7 @@ file (jpg/png/webp/pdf)
 | M1 | Image/PDF input; rotate, crop, auto-deskew, 4-corner perspective correction; scan view UI | — | done |
 | M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | |
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
-| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | |
+| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | in progress: staff lines ✓, noteheads ✓ |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
@@ -47,6 +47,22 @@ M1, M2 and M3 are independent of each other.
   WASM × 1 thread ≈ 4 s (model 1) and 8 s (model 2) per window.
 - The scan view shows the detected layers (staff, symbols, noteheads, stems/rests, clefs/keys) as a coloured overlay;
   the result is kept on `App.omr` for M4.
+
+## M4 method and progress
+
+- `tools/oemer_reference.py` runs the real oemer 0.1.8 step by step on `tests/fixtures/omr/aura-lee-staff.png`
+  (oemer's own inference, accurate step 128, no dewarp) and dumps the model maps (`maps.u8.gz`, bit-packed) and every
+  intermediate result (`reference.json`) plus oemer's MusicXML. Needs a venv with `oemer==0.1.8`, `onnxruntime==1.16.3`,
+  `numpy<2`, `opencv-python-headless<4.10`, `scikit-learn<1.6`, `scipy<1.14` (newer onnxruntime rejects model 1).
+- `tools/omr_golden.py` generates golden cases from OpenCV/scipy/sklearn/CPython for the primitives in
+  `src/omr/oemer/cv.ts` and `pyport.ts`: find_peaks, erode/dilate, ellipse kernels, ndimage.label, findContours order,
+  HoughLinesP (with cv::RNG), Ward clustering labels, `set.pop()` order, numpy pairwise sums. All match exactly
+  (find_peaks ties in the distance filter follow numpy's unstable argsort and are excluded).
+- oemer on the clean Aura Lee page: 12/12 bars, key and clef right; errors: 2 extra notes in bar 1 (tempo mark),
+  bar 2 misses the half note. The port aims to reproduce oemer exactly, then improve.
+- Ported and matching oemer exactly: staff-line extraction (`staffline.ts`), notehead extraction (`notehead.ts`).
+- Next: note groups, symbols (barlines, clefs, accidentals, rests — convert oemer's scikit-learn classifiers),
+  rhythm, system building → `SLScore`.
 
 ## Notes and risks
 
