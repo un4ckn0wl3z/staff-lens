@@ -335,6 +335,22 @@ output {
   border: 2px solid var(--select);
   background: color-mix(in srgb, var(--select) 22%, transparent);
 }
+.sel.rest {
+  border-radius: 8px;
+}
+.ed-chord {
+  min-height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 2px 8px;
+  width: 9em;
+}
+.panel .btn[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
 .sel.match {
   border-color: var(--match);
   background: color-mix(in srgb, var(--match) 20%, transparent);

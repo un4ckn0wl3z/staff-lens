@@ -27,13 +27,25 @@ file (jpg/png/webp/pdf)
 | # | Milestone | Depends on | Status |
 |---|---|---|---|
 | M1 | Image/PDF input; rotate, crop, auto-deskew, 4-corner perspective correction; scan view UI | — | done |
-| M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | |
+| M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | done (see note) |
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
 | M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | done |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
 M1, M2 and M3 are independent of each other.
+
+## M2 notes
+
+- Edits are applied to the imported alphaTab score and the StaffLens model is rebuilt from it after every edit
+  (`src/model/edit.ts`), so tab, playback, explanations and exports always reflect the edited notes. Undo/redo keeps
+  score snapshots. MusicXML chord symbols are written onto beats before the first edit so they survive.
+- Edit panel: pitch (step in key, octave, ♭ ♮ ♯), length and dot, add note after / chord note, rest ↔ note,
+  delete note / beat, chord symbol, undo/redo, keyboard shortcuts; clicking a rest selects it.
+- oemer gives no per-note confidence, so instead of confidence colours the panel runs a **bar check**: bars whose
+  voice 1 does not add up to the time signature are listed (on the Aura Lee scan it finds exactly the two misread
+  bars). Real confidence highlighting needs scores from the models; revisit if the post-processing keeps the
+  per-pixel probabilities.
 
 ## M3 results (2026-11-12)
 

@@ -15,14 +15,16 @@ import { buildRenderScore, idForRenderedNote, type RenderScore } from './model/t
 import { chordShapes, shapePitches, simpleVoicing } from './theory/chordShapes';
 import { positionsFor, TUNINGS, type FretPosition } from './theory/fretboard';
 import type { OptimizerMode } from './theory/optimizer';
-import { spellMidi, spn } from './theory/pitch';
+import { spellMidi, spn, type SpelledPitch } from './theory/pitch';
 import { exportPanelHtml, tabPanelHtml } from './ui/forms';
 import { Fretboard, type FretHighlight } from './ui/fretboard';
 import { ScanView, type ScanResult } from './ui/scanView';
+import { editPanelHtml } from './ui/editPanel';
+import { applyEdit, barLengthIssues, beatAt, beatRefOf, defaultWrittenPitch, EditHistory, finishScore, materializeChords, stepPitch, type BeatRef, type EditOp } from './model/edit';
 import type { Segmentation } from './omr/runner';
 import { isImageFile } from './omr/imageInput';
 
-type PanelTab = 'overview' | 'note' | 'chord' | 'tab' | 'export';
+type PanelTab = 'overview' | 'note' | 'chord' | 'edit' | 'tab' | 'export';
 type View = 'both' | 'staff' | 'tab';
 type Mix = 'both' | 'melody' | 'chords';
 
@@ -58,6 +60,10 @@ export class App {
   private lastPointer: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private fretboard!: Fretboard;
   private scan!: ScanView;
+  private history = new EditHistory();
+  private chordsMaterialized = false;
+  /** Selected rest (when no note is selected). */
+  private selectedRest: BeatRef | null = null;
   /** Last recognition result; the note-building step (M4) reads it. */
   omr: { scan: ScanResult; seg: Segmentation } | null = null;
   private playingIds: string[] = [];
@@ -251,6 +257,9 @@ export class App {
     if (model.parts.length === 0) throw new Error('no pitched notes found');
     this.base = at;
     this.model = model;
+    this.history.clear();
+    this.chordsMaterialized = !harmony;
+    this.selectedRest = null;
     // Prefer a part with notes in a treble-ish range (melody); otherwise the first.
     this.partIndex = Math.max(0, model.parts.findIndex((p) => p.clef === 'treble'));
     this.settings = structuredClone(DEFAULT_TAB_SETTINGS);
@@ -397,6 +406,9 @@ export class App {
       // Click above the top staff of the system: the chord-symbol row.
       const top = Math.min(...entries.map((e) => e.barBounds.visualBounds.y));
       if (lp.y < top + 6) this.onScoreChordClick(beat);
+      else if (beat.notes.length === 0 && this.model && beat.voice.bar.staff.track.index === this.part.trackIndex) {
+        this.selectRest({ track: this.part.trackIndex, staff: this.part.staffIndex, bar: beat.voice.bar.index, voice: beat.voice.index, beat: beat.index });
+      }
       return;
     }
     const onTab = this.view === 'tab' || (this.view === 'both' && entries.length > 1 && bestEntryY >= Math.max(...entries.map((e) => e.visualBounds.y)));
@@ -439,15 +451,25 @@ export class App {
     if (onTab) this.openLockPopover(sl);
   }
 
+  private selectRest(ref: BeatRef): void {
+    this.selectedId = null;
+    this.selectedRest = ref;
+    if (this.tab !== 'edit') this.setTab('edit');
+    this.drawOverlay();
+    this.updateFretboard();
+    this.renderPanel();
+  }
+
   selectNote(id: string | null, play: boolean, scroll = false): void {
     this.selectedId = id;
+    if (id) this.selectedRest = null;
     this.closePopover();
     const sl = id ? this.part.notes.find((n) => n.id === id) : null;
     if (sl) {
       const chord = this.part.chords.filter((c) => c.absTick <= sl.absTick).pop();
       if (chord) this.selectedChord = this.part.chords.indexOf(chord);
       if (play) this.playNote(sl);
-      if (this.tab !== 'note' && this.tab !== 'tab') this.setTab('note');
+      if (this.tab !== 'note' && this.tab !== 'tab' && this.tab !== 'edit') this.setTab('note');
       if (scroll) this.scrollToNote(sl.id);
     }
     this.drawOverlay();
@@ -511,6 +533,21 @@ export class App {
     };
     for (const id of this.matchIds) add(id, 'match');
     if (this.selectedId) add(this.selectedId, 'selected');
+    if (this.selectedRest && this.render) {
+      const r = this.selectedRest;
+      const beat = this.render.score.tracks[r.track]?.staves[0]?.bars[r.bar]?.voices[r.voice]?.beats[r.beat];
+      const bb = beat ? lookup.findBeats(beat)?.[0] : null;
+      if (bb) {
+        const b = bb.visualBounds;
+        const div = document.createElement('div');
+        div.className = 'sel selected rest';
+        div.style.left = `${b.x - 3}px`;
+        div.style.top = `${b.y - 3}px`;
+        div.style.width = `${b.w + 6}px`;
+        div.style.height = `${b.h + 6}px`;
+        layer.appendChild(div);
+      }
+    }
   }
 
   // ------------------------------------------------------------ lock popover
@@ -645,6 +682,9 @@ export class App {
       case 'export':
         html = `<h2>${esc(t('export.heading'))}</h2>` + exportPanelHtml(this.asciiCache);
         break;
+      case 'edit':
+        html = editPanelHtml(this.editState());
+        break;
     }
     panel.innerHTML = html;
     panel.classList.toggle('detailed', this.detailed);
@@ -721,6 +761,62 @@ export class App {
       case 'export-print':
         window.print();
         break;
+      case 'ed-step':
+        this.editPitch((p, fifths) => stepPitch(p, Number(el.dataset.d), fifths));
+        break;
+      case 'ed-oct':
+        this.editPitch((p) => ({ ...p, octave: p.octave + Number(el.dataset.d) }));
+        break;
+      case 'ed-acc':
+        this.editPitch((p) => ({ ...p, alter: Number(el.dataset.a) }));
+        break;
+      case 'ed-dur':
+        this.editDuration(Number(el.dataset.v), null);
+        break;
+      case 'ed-dot':
+        this.editDuration(null, 'toggle');
+        break;
+      case 'ed-insert':
+        this.editInsert();
+        break;
+      case 'ed-chordnote':
+        this.editChordNote();
+        break;
+      case 'ed-rest': {
+        const ref = this.currentRef();
+        if (ref) this.applyEditOp({ kind: 'makeRest', ref });
+        break;
+      }
+      case 'ed-note': {
+        const ref = this.currentRef();
+        if (ref) this.applyEditOp({ kind: 'addNote', ref, written: defaultWrittenPitch(this.part, ref, this.keyAt(ref.bar)), offset: this.partOffset() }, true);
+        break;
+      }
+      case 'ed-del-note':
+        if (this.selectedId) this.applyEditOp({ kind: 'deleteNote', noteId: this.selectedId });
+        break;
+      case 'ed-del-beat': {
+        const ref = this.currentRef();
+        if (ref) this.applyEditOp({ kind: 'deleteBeat', ref }, false, true);
+        break;
+      }
+      case 'ed-chord-set': {
+        const ref = this.currentRef();
+        const input = $('#panel').querySelector<HTMLInputElement>('input[name=ed-chord]');
+        if (ref && input) this.applyEditOp({ kind: 'chord', ref, text: input.value });
+        break;
+      }
+      case 'ed-chord-del': {
+        const ref = this.currentRef();
+        if (ref) this.applyEditOp({ kind: 'chord', ref, text: null });
+        break;
+      }
+      case 'ed-undo':
+        this.undoRedo('undo');
+        break;
+      case 'ed-redo':
+        this.undoRedo('redo');
+        break;
     }
   }
 
@@ -776,6 +872,121 @@ export class App {
       this.settings.octaveShift[i] = Math.max(-3, Math.min(3, v));
     }
     this.rebuild();
+  }
+
+  // ------------------------------------------------------------ editing
+
+  private currentRef(): BeatRef | null {
+    if (this.selectedId) return beatRefOf(this.selectedId);
+    return this.selectedRest;
+  }
+
+  private keyAt(bar: number): number {
+    return this.model?.measures[bar]?.keyFifths ?? 0;
+  }
+
+  /** written − sounding for this part (12 for guitar notation). */
+  private partOffset(): number {
+    const n = this.part.notes[0];
+    return n ? n.writtenMidi - n.soundingMidi : 12;
+  }
+
+  private editState() {
+    const note = this.selectedId ? this.part.notes.find((n) => n.id === this.selectedId) ?? null : null;
+    const ref = this.currentRef();
+    const rest = !note && ref ? this.part.beats.find((b) => b.measure === ref.bar && b.voice === ref.voice && b.beatIndex === ref.beat) ?? null : null;
+    const tick = note?.tick ?? rest?.tick;
+    const chordAtBeat = ref && tick !== undefined ? this.part.chords.find((c) => c.measure === ref.bar && c.tick === tick) ?? null : null;
+    return {
+      note,
+      rest,
+      ref,
+      chordAtBeat,
+      canUndo: this.history.canUndo,
+      canRedo: this.history.canRedo,
+      issues: this.model ? barLengthIssues(this.model, this.part) : [],
+      quarterTicks: 960,
+    };
+  }
+
+  /** Applies an edit to the source score, rebuilds the model and re-renders. */
+  private applyEditOp(op: EditOp, play = false, structural = false): void {
+    if (!this.base || !this.model) return;
+    if (!this.chordsMaterialized) {
+      materializeChords(this.base, this.part);
+      this.base = finishScore(this.base, this.api.settings);
+      this.chordsMaterialized = true;
+    }
+    this.history.record(this.base);
+    let res;
+    try {
+      res = applyEdit(this.base, op);
+    } catch (e) {
+      this.toast((e as Error).message, true);
+      return;
+    }
+    this.afterScoreChange(res.noteId, res.noteId ? null : res.ref, structural);
+    if (play && this.selectedId) {
+      const sl = this.part.notes.find((n) => n.id === this.selectedId);
+      if (sl) this.playNote(sl);
+    }
+  }
+
+  private afterScoreChange(noteId: string | null, rest: BeatRef | null, structural: boolean): void {
+    this.base = finishScore(this.base!, this.api.settings);
+    const source = this.model!.source;
+    const trackIndex = this.part.trackIndex;
+    const staffIndex = this.part.staffIndex;
+    this.model = fromAlphaTab(this.base, source, null);
+    const idx = this.model.parts.findIndex((p) => p.trackIndex === trackIndex && p.staffIndex === staffIndex);
+    this.partIndex = idx >= 0 ? idx : 0;
+    if (structural) this.settings.locks = {};
+    this.selectedId = noteId && this.part.notes.some((n) => n.id === noteId) ? noteId : null;
+    this.selectedRest = this.selectedId ? null : rest;
+    this.matchIds.clear();
+    this.rebuild();
+    this.setTab('edit');
+  }
+
+  private undoRedo(dir: 'undo' | 'redo'): void {
+    if (!this.base) return;
+    const next = dir === 'undo' ? this.history.undo(this.base, this.api.settings) : this.history.redo(this.base, this.api.settings);
+    if (!next) return;
+    this.base = next;
+    const keep = this.selectedId;
+    this.afterScoreChange(keep, this.selectedRest, true);
+  }
+
+  private editPitch(f: (p: SpelledPitch, fifths: number) => SpelledPitch): void {
+    const sl = this.selectedId ? this.part.notes.find((n) => n.id === this.selectedId) : null;
+    if (!sl) return;
+    const written = f(sl.written, this.keyAt(sl.measure));
+    if (written.octave < 0 || written.octave > 8) return;
+    this.applyEditOp({ kind: 'pitch', noteId: sl.id, written, offset: sl.writtenMidi - sl.soundingMidi }, true);
+  }
+
+  private editDuration(value: number | null, dot: 'toggle' | null): void {
+    const ref = this.currentRef();
+    const beat = ref && this.base ? beatAt(this.base, ref) : null;
+    if (!ref || !beat) return;
+    const v = value ?? Number(beat.duration);
+    const dots = dot === 'toggle' ? (beat.dots ? 0 : 1) : beat.dots;
+    this.applyEditOp({ kind: 'duration', ref, value: v, dots });
+  }
+
+  private editInsert(): void {
+    const ref = this.currentRef();
+    if (!ref) return;
+    const sl = this.selectedId ? this.part.notes.find((n) => n.id === this.selectedId) : null;
+    const written = sl ? sl.written : defaultWrittenPitch(this.part, ref, this.keyAt(ref.bar));
+    this.applyEditOp({ kind: 'insertAfter', ref, written, offset: sl ? sl.writtenMidi - sl.soundingMidi : this.partOffset() }, true, true);
+  }
+
+  private editChordNote(): void {
+    const sl = this.selectedId ? this.part.notes.find((n) => n.id === this.selectedId) : null;
+    if (!sl) return;
+    const written = stepPitch(sl.written, 2, this.keyAt(sl.measure)); // a third above
+    this.applyEditOp({ kind: 'addNote', ref: beatRefOf(sl.id), written, offset: sl.writtenMidi - sl.soundingMidi }, true);
   }
 
   // ------------------------------------------------------------ export helpers
@@ -970,6 +1181,40 @@ export class App {
       const typing = target.closest('input, select, textarea, [contenteditable]');
       if (e.key === 'Escape') this.closePopover();
       if (typing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (this.model && mod && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
+        e.preventDefault();
+        this.undoRedo(e.key === 'y' || e.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (this.model && this.tab === 'edit' && !target.closest('[role=tab]')) {
+        const durKeys: Record<string, number> = { '1': 1, '2': 2, '3': 4, '4': 8, '5': 16, '6': 32 };
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const d = e.key === 'ArrowUp' ? 1 : -1;
+          if (mod) this.editPitch((p) => ({ ...p, octave: p.octave + d }));
+          else this.editPitch((p, f) => stepPitch(p, d, f));
+          return;
+        }
+        if (durKeys[e.key]) return this.editDuration(durKeys[e.key], null);
+        if (e.key === '.') return this.editDuration(null, 'toggle');
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          const ref = this.currentRef();
+          if (this.selectedId) this.applyEditOp({ kind: 'deleteNote', noteId: this.selectedId });
+          else if (ref) this.applyEditOp({ kind: 'deleteBeat', ref }, false, true);
+          return;
+        }
+        if (e.key === 'r' || e.key === 'R') {
+          const ref = this.currentRef();
+          if (ref) this.applyEditOp({ kind: 'makeRest', ref });
+          return;
+        }
+        if (e.key === 'n' || e.key === 'N') return this.editInsert();
+        if (e.key === '#') return this.editPitch((p) => ({ ...p, alter: 1 }));
+        if (e.key === '-') return this.editPitch((p) => ({ ...p, alter: -1 }));
+        if (e.key === '=') return this.editPitch((p) => ({ ...p, alter: 0 }));
+      }
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         if (target.closest('[role=tab]')) return;
         e.preventDefault();
