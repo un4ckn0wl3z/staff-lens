@@ -10,11 +10,13 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "fetch-models": "node tools/fetch-models.mjs"
   },
   "license": "MIT",
   "dependencies": {
     "@coderline/alphatab": "^1.9.0",
+    "onnxruntime-web": "^1.31.1",
     "pdfjs-dist": "^6.5.438"
   },
   "devDependencies": {

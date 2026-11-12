@@ -28,12 +28,25 @@ file (jpg/png/webp/pdf)
 |---|---|---|---|
 | M1 | Image/PDF input; rotate, crop, auto-deskew, 4-corner perspective correction; scan view UI | — | done |
 | M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | |
-| M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | |
+| M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
 | M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
 M1, M2 and M3 are independent of each other.
+
+## M3 results (2026-11-12)
+
+- Model I/O (checked with onnxruntime-web): input `uint8` NHWC, **BGR** channel order (oemer reads with OpenCV).
+  1st model: window 256, 3 classes (bg, staff, symbols). 2nd model: window **288**, 4 classes (bg, stems/rests, noteheads, clefs/keys).
+- `npm run fetch-models` downloads both files with pinned SHA-256; CI caches them (`actions/cache`).
+- Inference runs in `src/omr/inference.worker.ts`; WebGPU first, WASM fallback. The page is cross-origin isolated
+  (dev/preview headers, and the service worker on GitHub Pages), so WASM uses up to 8 threads.
+- Measured on the rendered Aura Lee page (resized to 1408×2610, "fast" quality, 84 + 66 windows):
+  WebGPU ≈ 0.65 s/window, 157 s in total including the first download; WASM × 8 threads is about as fast here;
+  WASM × 1 thread ≈ 4 s (model 1) and 8 s (model 2) per window.
+- The scan view shows the detected layers (staff, symbols, noteheads, stems/rests, clefs/keys) as a coloured overlay;
+  the result is kept on `App.omr` for M4.
 
 ## Notes and risks
 

@@ -5,6 +5,9 @@ import { esc } from '../explain/format';
 import { t } from '../i18n';
 import { estimateSkew, isFullQuad, rotate, rotate90, warpPerspective, type Img, type Pt } from '../omr/geometry';
 import { drawImg, loadImageFile, openPdf, type PdfHandle } from '../omr/imageInput';
+import { LAYER_COLORS, OmrRunner, overlayImage, type ProgressInfo, type Segmentation } from '../omr/runner';
+import type { Quality } from '../omr/tiling';
+import type { StringKey } from '../i18n';
 
 export interface ScanResult {
   image: Img;
@@ -29,10 +32,16 @@ export class ScanView {
   private preview = false;
   private busy = false;
   private drag: { index: number; pointerId: number } | null = null;
+  private runner = new OmrRunner();
+  private quality: Quality = 'fast';
+  private seg: Segmentation | null = null;
+  private showSeg = false;
+  private layers = new Set(LAYER_COLORS.map((l) => l.key));
+  private inferStart = 0;
 
   constructor(
     private toast: (msg: string, error?: boolean) => void,
-    private onRecognize: ((r: ScanResult) => void) | null,
+    private onSegmented: ((r: ScanResult, seg: Segmentation) => void) | null = null,
   ) {
     this.root = document.createElement('div');
     this.root.className = 'scan-view';
@@ -47,6 +56,13 @@ export class ScanView {
     this.root.addEventListener('change', (e) => {
       const el = e.target as HTMLSelectElement;
       if (el.name === 'scan-page') void this.loadPage(Number(el.value));
+      if (el.name === 'quality') this.quality = el.value as Quality;
+      if (el.name === 'layer') {
+        const cb = el as unknown as HTMLInputElement;
+        if (cb.checked) this.layers.add(cb.value);
+        else this.layers.delete(cb.value);
+        this.drawSeg();
+      }
     });
     this.root.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.close();
@@ -61,6 +77,7 @@ export class ScanView {
     this.close();
     this.fileName = file.name;
     this.root.hidden = false;
+    document.body.classList.add('scanning');
     this.renderShell();
     this.setBusy(true);
     try {
@@ -82,12 +99,16 @@ export class ScanView {
   }
 
   close(): void {
+    this.runner.cancel();
+    this.seg = null;
+    this.showSeg = false;
     this.pdf?.destroy();
     this.pdf = null;
     this.original = null;
     this.straight = null;
     this.root.hidden = true;
     this.root.innerHTML = '';
+    document.body.classList.remove('scanning');
   }
 
   private async loadPage(index: number): Promise<void> {
@@ -108,6 +129,8 @@ export class ScanView {
     this.skew = 0;
     this.corners = [];
     this.preview = false;
+    this.seg = null;
+    this.showSeg = false;
   }
 
   /** Recomputes the rotated / straightened image; corners are reset to the full image. */
@@ -127,6 +150,8 @@ export class ScanView {
       ];
     }
     this.preview = false;
+    this.seg = null;
+    this.showSeg = false;
     this.draw();
     this.setBusy(false);
   }
@@ -138,7 +163,7 @@ export class ScanView {
   }
 
   private async action(name: string, _el: HTMLElement): Promise<void> {
-    if (this.busy && name !== 'close') return;
+    if (this.busy && name !== 'close' && name !== 'cancel') return;
     switch (name) {
       case 'close':
         this.close();
@@ -170,11 +195,20 @@ export class ScanView {
         this.draw();
         this.setBusy(false);
         break;
-      case 'recognize': {
-        const image = this.result();
-        if (image && this.onRecognize) this.onRecognize({ image, fileName: this.fileName, page: this.page });
+      case 'recognize':
+        await this.recognize();
         break;
-      }
+      case 'cancel':
+        this.runner.cancel();
+        break;
+      case 'back':
+        this.showSeg = false;
+        this.draw();
+        break;
+      case 'show-seg':
+        this.showSeg = true;
+        this.drawSeg();
+        break;
     }
   }
 
@@ -187,7 +221,10 @@ export class ScanView {
           (_, i) => `<option value="${i}" ${i === this.page ? 'selected' : ''}>${i + 1} / ${this.pdf!.pageCount}</option>`,
         ).join('')}</select></label>`
       : '';
-    const canRecognize = !!this.onRecognize;
+    const layerBoxes = LAYER_COLORS.map(
+      (l) =>
+        `<label class="check layer"><input type="checkbox" name="layer" value="${l.key}" ${this.layers.has(l.key) ? 'checked' : ''}><span class="swatch" style="background:rgb(${l.rgb.join(',')})"></span>${esc(t(`omr.layer.${l.key}` as StringKey))}</label>`,
+    ).join('');
     this.root.innerHTML = `
       <div class="scan-head">
         <h2>${esc(t('scan.title'))}</h2>
@@ -202,9 +239,23 @@ export class ScanView {
         <button class="btn" data-scan="preview" aria-pressed="false">${esc(t('scan.preview'))}</button>
         <button class="btn ghost" data-scan="reset">${esc(t('scan.reset'))}</button>
         <span class="spacer"></span>
-        <button class="btn primary" data-scan="recognize" ${canRecognize ? '' : 'disabled'}>${esc(t('scan.recognize'))}</button>
+        <label class="field inline"><span>${esc(t('omr.quality'))}</span><select name="quality">
+          <option value="fast" ${this.quality === 'fast' ? 'selected' : ''}>${esc(t('omr.fast'))}</option>
+          <option value="accurate" ${this.quality === 'accurate' ? 'selected' : ''}>${esc(t('omr.accurate'))}</option>
+        </select></label>
+        <button class="btn primary" data-scan="recognize">${esc(t('scan.recognize'))}</button>
       </div>
-      <p class="muted small scan-hint">${esc(t('scan.hint'))}${canRecognize ? '' : ' ' + esc(t('scan.engineSoon'))}</p>
+      <p class="muted small scan-hint">${esc(t('scan.hint'))}</p>
+      <div class="scan-progress" hidden>
+        <progress max="1" value="0"></progress>
+        <span class="small progress-label" aria-live="polite"></span>
+        <button class="btn small" data-scan="cancel">${esc(t('omr.cancel'))}</button>
+      </div>
+      <div class="scan-layers" hidden>
+        ${layerBoxes}
+        <button class="btn small" data-scan="back">${esc(t('omr.back'))}</button>
+        <button class="btn small" data-scan="show-seg">${esc(t('omr.showSeg'))}</button>
+      </div>
       <div class="scan-stage"><div class="scan-frame"><canvas></canvas><svg class="scan-overlay"></svg></div></div>
       <p class="muted small scan-status" aria-live="polite"></p>`;
     this.canvas = this.root.querySelector('canvas')!;
@@ -223,8 +274,71 @@ export class ScanView {
     if (el) el.textContent = msg;
   }
 
+  private async recognize(): Promise<void> {
+    const image = this.result();
+    if (!image) return;
+    const progress = this.root.querySelector<HTMLElement>('.scan-progress')!;
+    const bar = progress.querySelector('progress')!;
+    const label = progress.querySelector<HTMLElement>('.progress-label')!;
+    progress.hidden = false;
+    this.root.querySelector<HTMLElement>('.scan-layers')!.hidden = true;
+    this.root.classList.add('running');
+    this.inferStart = 0;
+    try {
+      const seg = await this.runner.run(image, this.quality, (p) => this.onProgress(p, bar, label));
+      this.seg = seg;
+      this.showSeg = true;
+      this.drawSeg();
+      const secs = Math.round(seg.ms / 1000);
+      this.status(t('omr.done', { s: secs, provider: seg.provider === 'webgpu' ? 'WebGPU' : `WASM × ${seg.threads}` }) + ' ' + t('omr.next'));
+      this.onSegmented?.({ image, fileName: this.fileName, page: this.page }, seg);
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg === 'cancelled') this.status(t('omr.cancelled'));
+      else this.toast(t('omr.error', { msg }), true);
+    } finally {
+      progress.hidden = true;
+      this.root.classList.remove('running');
+    }
+  }
+
+  private onProgress(p: ProgressInfo, bar: HTMLProgressElement, label: HTMLElement): void {
+    const model = p.model + 1;
+    // overall: each model = 15% download/load + 85% inference
+    const share = (frac: number) => (p.model + frac) / 2;
+    if (p.stage === 'download') {
+      bar.value = share(p.total ? (0.15 * p.done) / p.total : 0);
+      label.textContent = t('omr.download', { model, mb: (p.done / 1e6).toFixed(0), total: p.total ? (p.total / 1e6).toFixed(0) : '?' });
+    } else if (p.stage === 'load') {
+      bar.value = share(0.15);
+      label.textContent = t('omr.load', { model });
+    } else {
+      if (p.done === 0) this.inferStart = performance.now();
+      bar.value = share(0.15 + (0.85 * p.done) / Math.max(1, p.total));
+      let eta = '';
+      if (p.done > 0) {
+        const per = (performance.now() - this.inferStart) / p.done;
+        eta = ' · ' + t('omr.eta', { s: Math.max(1, Math.round((per * (p.total - p.done)) / 1000)) });
+      }
+      const how = p.provider === 'webgpu' ? 'WebGPU' : `WASM × ${p.threads ?? 1}`;
+      label.textContent = t('omr.infer', { model, done: p.done, total: p.total, how }) + eta;
+      if (p.provider === 'wasm' && (p.threads ?? 1) === 1 && p.done === 0) this.status(t('omr.slowHint'));
+    }
+  }
+
+  private drawSeg(): void {
+    if (!this.seg || !this.showSeg) return;
+    drawImg(this.canvas, overlayImage(this.seg, this.layers));
+    this.svg.setAttribute('viewBox', `0 0 ${this.seg.image.width} ${this.seg.image.height}`);
+    this.svg.innerHTML = '';
+    const layersEl = this.root.querySelector<HTMLElement>('.scan-layers');
+    if (layersEl) layersEl.hidden = false;
+  }
+
   private draw(): void {
     if (!this.straight) return;
+    const layersEl = this.root.querySelector<HTMLElement>('.scan-layers');
+    if (layersEl) layersEl.hidden = !this.seg;
     const shown = this.preview ? this.result()! : this.straight;
     drawImg(this.canvas, shown);
     this.root.querySelector('[data-scan="preview"]')?.setAttribute('aria-pressed', String(this.preview));

@@ -3,6 +3,8 @@ dist/
 # copied from @coderline/alphatab by the alphaTab Vite plugin on every dev/build run
 public/font/
 public/soundfont/
+# oemer ONNX models (~110 MB), downloaded by `npm run fetch-models`
+public/models/
 .claude/
 *.log
 .DS_Store

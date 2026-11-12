@@ -871,6 +871,11 @@ body.dragging .drop-overlay {
 .scan-view[hidden] {
   display: none;
 }
+/* alphaTab's cursors sit on a high z-index; hide the score while scanning */
+body.scanning .workspace,
+body.scanning .fretboard-bar {
+  visibility: hidden;
+}
 .scan-head {
   display: flex;
   align-items: center;
@@ -950,6 +955,32 @@ body.dragging .drop-overlay {
 }
 .scan-status {
   margin: 0;
+}
+.scan-progress,
+.scan-layers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.scan-progress[hidden],
+.scan-layers[hidden] {
+  display: none;
+}
+.scan-progress progress {
+  width: min(320px, 100%);
+  accent-color: var(--accent);
+}
+.scan-layers .swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.scan-view.running .scan-tools .btn:not([data-scan='close']),
+.scan-view.running .scan-tools select {
+  pointer-events: none;
+  opacity: 0.5;
 }
 .scan-view.busy .scan-stage {
   cursor: progress;

@@ -1,6 +1,8 @@
-// StaffLens service worker: offline after the first visit.
+// StaffLens service worker: offline after the first visit, and cross-origin isolation.
 // Navigations: network first, cached page as fallback. Other same-origin GETs: cache first, then network.
-const CACHE = 'stafflens-v1';
+// Every same-origin response gets COOP/COEP/CORP headers so the page is cross-origin isolated
+// (GitHub Pages cannot set headers); that enables multi-threaded WASM for note recognition.
+const CACHE = 'stafflens-v2';
 const scope = self.registration.scope;
 const CORE = ['', 'index.html', 'manifest.webmanifest', 'icon.svg', 'samples/aura-lee.musicxml', 'samples/chord-study.musicxml', 'soundfont/sonivox.sf2'].map((p) => new URL(p, scope).href);
 
@@ -22,6 +24,15 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function isolate(res) {
+  if (!res || res.status === 0 || res.type === 'opaque' || res.type === 'opaqueredirect') return res;
+  const headers = new Headers(res.headers);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || !req.url.startsWith(scope)) return;
@@ -31,23 +42,22 @@ self.addEventListener('fetch', (event) => {
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
-          return res;
+          return isolate(res);
         })
-        .catch(() => caches.match(req).then((r) => r || caches.match(new URL('index.html', scope).href))),
+        .catch(() => caches.match(req).then((r) => isolate(r) || caches.match(new URL('index.html', scope).href).then(isolate))),
     );
     return;
   }
   event.respondWith(
-    caches.match(req).then(
-      (hit) =>
-        hit ||
-        fetch(req).then((res) => {
-          if (res.ok && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-          }
-          return res;
-        }),
-    ),
+    caches.match(req).then((hit) => {
+      if (hit) return isolate(hit);
+      return fetch(req).then((res) => {
+        if (res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
+        return isolate(res);
+      });
+    }),
   );
 });

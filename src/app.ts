@@ -18,7 +18,8 @@ import type { OptimizerMode } from './theory/optimizer';
 import { spellMidi, spn } from './theory/pitch';
 import { exportPanelHtml, tabPanelHtml } from './ui/forms';
 import { Fretboard, type FretHighlight } from './ui/fretboard';
-import { ScanView } from './ui/scanView';
+import { ScanView, type ScanResult } from './ui/scanView';
+import type { Segmentation } from './omr/runner';
 import { isImageFile } from './omr/imageInput';
 
 type PanelTab = 'overview' | 'note' | 'chord' | 'tab' | 'export';
@@ -57,11 +58,18 @@ export class App {
   private lastPointer: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private fretboard!: Fretboard;
   private scan!: ScanView;
+  /** Last recognition result; the note-building step (M4) reads it. */
+  omr: { scan: ScanResult; seg: Segmentation } | null = null;
   private playingIds: string[] = [];
   private asciiCache = '';
 
   start(): void {
-    this.scan = new ScanView((m, e) => this.toast(m, e), null);
+    this.scan = new ScanView(
+      (m, e) => this.toast(m, e),
+      (scan, seg) => {
+        this.omr = { scan, seg }; // input for the note-building step (M4)
+      },
+    );
     this.fretboard = new Fretboard($('#fretboard'), (pos, midi) => this.onFretPick(pos, midi));
     this.setupAlphaTab();
     this.bindChrome();
