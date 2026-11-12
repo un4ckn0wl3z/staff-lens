@@ -269,6 +269,51 @@ export function quadSize(q: Pt[]): { width: number; height: number } {
   };
 }
 
+/**
+ * Width/height of the real rectangle photographed as `q` (TL, TR, BR, BL), assuming a pinhole camera with square
+ * pixels and the principal point at the image centre (Zhang & He, "Whiteboard scanning and image enhancement", 2007).
+ * When the focal length cannot be recovered from the corners, a typical phone camera's is assumed.
+ */
+export function quadAspect(q: Pt[], imageWidth: number, imageHeight: number): number {
+  const u0 = imageWidth / 2;
+  const v0 = imageHeight / 2;
+  const h = (p: Pt) => [p.x, p.y, 1];
+  const [m1, m2, m4, m3] = q.map(h); // m1 TL, m2 TR, m3 BL, m4 BR
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const k2 = dot(cross(m1, m4), m3) / dot(cross(m2, m4), m3);
+  const k3 = dot(cross(m1, m4), m2) / dot(cross(m3, m4), m2);
+  const n2 = m2.map((v, i) => k2 * v - m1[i]);
+  const n3 = m3.map((v, i) => k3 * v - m1[i]);
+  let f2 =
+    -(
+      n2[0] * n3[0] - (n2[0] * n3[2] + n2[2] * n3[0]) * u0 + n2[2] * n3[2] * u0 * u0 +
+      (n2[1] * n3[1] - (n2[1] * n3[2] + n2[2] * n3[1]) * v0 + n2[2] * n3[2] * v0 * v0)
+    ) / (n2[2] * n3[2]);
+  // With a pair of parallel edges (tilt in one direction only) the focal length cannot be recovered: use a typical
+  // phone camera's (about 26 mm equivalent, f ≈ 0.75 × the long side).
+  const long = Math.max(imageWidth, imageHeight);
+  if (!(f2 > (0.3 * long) ** 2 && f2 < (3 * long) ** 2)) f2 = (0.75 * long) ** 2;
+  // n^T (A^-T A^-1) n with A = [[f, 0, u0], [0, f, v0], [0, 0, 1]]
+  const norm = (n: number[]) => {
+    const x = (n[0] - u0 * n[2]) ** 2 / f2;
+    const y = (n[1] - v0 * n[2]) ** 2 / f2;
+    return x + y + n[2] * n[2];
+  };
+  const r = Math.sqrt(norm(n2) / norm(n3));
+  return Number.isFinite(r) && r > 0 ? r : quadSize(q).width / quadSize(q).height;
+}
+
+/** Output size for straightening `q`: the real aspect ratio (see quadAspect) at about the photographed width. */
+export function rectifiedSize(q: Pt[], imageWidth: number, imageHeight: number): { width: number; height: number } {
+  const edges = quadSize(q);
+  const aspect = quadAspect(q, imageWidth, imageHeight);
+  // keep the pixel count of the edge-based estimate so the resolution stays about the same
+  const area = edges.width * edges.height;
+  const width = Math.max(1, Math.round(Math.sqrt(area * aspect)));
+  return { width, height: Math.max(1, Math.round(width / aspect)) };
+}
+
 /** Straightens the quadrilateral `quad` (TL, TR, BR, BL in source pixels) into a rectangle. */
 export function warpPerspective(img: Img, quad: Pt[], size = quadSize(quad)): Img {
   const { width, height } = size;
@@ -287,6 +332,53 @@ export function warpPerspective(img: Img, quad: Pt[], size = quadSize(quad)): Im
     }
   }
   return { width, height, data: out };
+}
+
+/**
+ * Whitens dark bands along the image edges: table or shadow left in when the corners are slightly outside the paper,
+ * and the blended pixels of the paper edge after straightening. The model reads such a band as a staff line and a
+ * page-high barline, and oemer then drops every real barline (it keeps only those at least half as tall as the
+ * tallest). A column (or row) counts as band when most of its pixels are much darker than the paper next to it;
+ * barlines and staff lines darken only a small part of a column, so they are left alone.
+ */
+export function clearEdgeBands(img: Img, maxFrac = 0.015, darkRatio = 0.8, minDarkShare = 0.6): Img {
+  const { width: w, height: h } = img;
+  const gray = toGray(img);
+  const out = new Uint8ClampedArray(img.data);
+  const lineMean = (vertical: boolean, k: number) => {
+    let sum = 0;
+    const n = vertical ? h : w;
+    for (let t = 0; t < n; t++) sum += gray[vertical ? t * w + k : k * w + t];
+    return sum / n;
+  };
+  const median = (v: number[]) => [...v].sort((a, b) => a - b)[v.length >> 1];
+  const sides: { vertical: boolean; at: (i: number) => number }[] = [
+    { vertical: true, at: (i) => i },
+    { vertical: true, at: (i) => w - 1 - i },
+    { vertical: false, at: (i) => i },
+    { vertical: false, at: (i) => h - 1 - i },
+  ];
+  for (const side of sides) {
+    const size = side.vertical ? w : h;
+    const reach = Math.max(1, Math.round(size * maxFrac));
+    if (size < reach * 4) continue;
+    // paper level next to this edge
+    const ref: number[] = [];
+    for (let i = reach; i < reach * 2; i++) ref.push(lineMean(side.vertical, side.at(i)));
+    const dark = median(ref) * darkRatio;
+    for (let i = 0; i < reach; i++) {
+      const k = side.at(i);
+      const n = side.vertical ? h : w;
+      let count = 0;
+      for (let t = 0; t < n; t++) if (gray[side.vertical ? t * w + k : k * w + t] < dark) count++;
+      if (count < n * minDarkShare) break;
+      for (let t = 0; t < n; t++) {
+        const o = (side.vertical ? t * w + k : k * w + t) * 4;
+        out[o] = out[o + 1] = out[o + 2] = 255;
+      }
+    }
+  }
+  return { width: w, height: h, data: out };
 }
 
 /** True when the quad is the full image (no perspective change needed). */

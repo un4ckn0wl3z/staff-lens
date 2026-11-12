@@ -31,7 +31,7 @@ file (jpg/png/webp/pdf)
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
 | M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | done |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | done (see note) |
-| M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
+| M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | done (see note) |
 
 M1, M2 and M3 are independent of each other.
 
@@ -60,6 +60,46 @@ M1, M2 and M3 are independent of each other.
   dev and build), so the app makes no third-party requests.
 - On open, bars are renumbered 1, 2, 3… (oemer repeats a number at system breaks) and the chords are put on the beats.
 - Aura Lee: all 13 chord symbols in the right bars and beats (node test and browser).
+
+## M6 fixtures and accuracy (2026-11-12)
+
+Test pages in `tests/fixtures/omr/` (each folder: oemer's model maps `maps.u8.gz`, oemer's intermediate results
+`reference.json` and oemer's MusicXML, made with `tools/oemer_reference.py <page> <dir> [title]`):
+
+| Page | Source | What it covers |
+|---|---|---|
+| `aura-lee-staff.png` (top folder) | Aura Lee sample, rendered in the app | quarters, halves, wholes, chord symbols |
+| `rhythm/` (`rhythm-study.png`) | `rhythm-study.musicxml` from `tools/make-omr-fixtures.mjs` (an original exercise) | beamed eighths and sixteenths, dotted rhythms, quarter/eighth/half/whole rests, ♯ ♮ ♭ accidentals, flat key |
+| `rhythm-photo/` (`photo.jpg`) | `tools/make_photo_fixture.py`: the page on paper photographed by a pinhole camera (f = 0.75 × width) at an angle, uneven light, shadow, blur, noise, JPEG | perspective correction and a degraded image |
+
+`tests/omr-e2e.test.ts` runs the TypeScript post-processing on each page's maps and requires MusicXML byte-identical
+to oemer's, then scores it against the source score (`tests/helpers/omrAccuracy.ts`: edit distance over voice-1
+events, and over pitches only) and prints a bar-by-bar comparison. Measured, kept as floors:
+
+| Page | Notes + rests (pitch and length) | Pitches | Bars |
+|---|---|---|---|
+| Aura Lee, rendered | 91.7% | 91.7% | 12/12 |
+| Rhythm Study, rendered | 66.7% | 79.5% | 9/10 |
+| Rhythm Study, photo | 64.4% | 74.4% | 9/10 |
+| Rhythm Study, photo, in the browser (fast quality, WebGPU, 176 s) | 60.0% | 74.4% | 9/10 |
+
+These are oemer's own limits (the port reproduces them exactly). What it gets wrong on the Rhythm Study:
+the ♩ of the tempo mark is read as a note (D6) and a bar is lost in system 1, so later bars shift; the flat key
+signature is missed on the clean page and read as a sharp on the photo; most rests are dropped (eighth, half, whole)
+as is the last bar. Beams, sixteenths, dots and accidentals in bars that line up are right. The editor's bar check
+lists the bars whose lengths do not add up, which catches most of these.
+
+Found and fixed in StaffLens while testing the photo:
+
+- **Output shape**: the corner quad's edge lengths make a tilted page too tall (foreshortening, 10–17% here).
+  `rectifiedSize` / `quadAspect` (`src/omr/geometry.ts`) recover the paper's real aspect ratio from the corners with a
+  pinhole camera model (Zhang & He 2007), assuming a typical phone focal length when the corners cannot give it.
+- **Edge bands**: after straightening, the outermost pixels blend in the table. The model read that 2 px band as a
+  page-high staff line and barline, and oemer then drops every real barline (it keeps those at least half as tall
+  as the tallest): the photo came out as 2 bars. `clearEdgeBands` whitens near-solid dark bands at the edges before
+  recognition (staff lines and barlines are left alone); the photo then gives the same 9 bars as oemer's reference.
+- Chord OCR on the photo found 4 of 9 symbols (small, blurred text); it places none wrongly relative to the
+  recognised bars.
 
 ## M3 results (2026-11-12)
 
@@ -94,7 +134,7 @@ M1, M2 and M3 are independent of each other.
   oemer's four SVMs (exported by `tools/export_oemer_svm.py` to `public/omr/`), 8-connected `cv2.line`, `fillPoly`,
   `contourArea`, and `minAreaRect` (truncated corners agree with OpenCV in ≥90% of cases; OpenCV's float32 noise
   moves the rest by one pixel).
-- Not covered by the fixture yet: rests and beamed notes (no rests or beams on the Aura Lee page) — add fixtures in M6.
+- Rests and beamed notes are covered by the M6 fixtures (byte-identical to oemer there too).
 - System building (`builder.ts`) writes MusicXML byte-identical to oemer's for the fixture; StaffLens opens it with
   its normal MusicXML import, so recognised scores get rendering, playback, explanations and staff → tab.
 - `pipeline.ts` runs the whole post-processing inside the inference worker (~6 s for a 3.7 MP page after the

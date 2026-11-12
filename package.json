@@ -2,7 +2,7 @@
   "name": "staff-lens",
   "private": true,
   "version": "0.1.0",
-  "description": "StaffLens \u2014 read, explain, play and convert standard notation to guitar tab, entirely in the browser.",
+  "description": "StaffLens — read, explain, play and convert standard notation to guitar tab, entirely in the browser.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,6 +27,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "@types/pngjs": "^6.0.5",
     "happy-dom": "^21.0.4",
+    "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",

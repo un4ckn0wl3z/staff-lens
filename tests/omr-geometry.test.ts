@@ -14,6 +14,7 @@ import {
   warpPerspective,
   type Img,
 } from '../src/omr/geometry';
+import { clearEdgeBands, quadAspect, rectifiedSize } from '../src/omr/geometry';
 
 function setDark(img: Img, x: number, y: number): void {
   if (x < 0 || y < 0 || x >= img.width || y >= img.height) return;
@@ -136,5 +137,63 @@ describe('omr geometry', () => {
     expect(mp).toBeGreaterThan(3_000_000);
     expect(mp).toBeLessThan(4_350_000);
     expect(s.width / s.height).toBeCloseTo(2480 / 3508, 2);
+  });
+});
+
+describe('rectangle aspect ratio from a perspective photo', () => {
+  // project a 3:1 rectangle with a pinhole camera (focal 1500 px, principal point at the image centre)
+  const project = (yaw: number, pitch: number) => {
+    const [W, H, f] = [2000, 1300, 1500];
+    const pts = [[-1.5, -0.5], [1.5, -0.5], [1.5, 0.5], [-1.5, 0.5]].map(([x, y]) => {
+      // rotate about y (yaw) then x (pitch), push 5 units away
+      const x1 = x * Math.cos(yaw);
+      const z1 = -x * Math.sin(yaw);
+      const y2 = y * Math.cos(pitch) - z1 * Math.sin(pitch);
+      const z2 = y * Math.sin(pitch) + z1 * Math.cos(pitch) + 5;
+      return { x: W / 2 + (f * x1) / z2, y: H / 2 + (f * y2) / z2 };
+    });
+    return { pts, W, H };
+  };
+
+  it.each([
+    [0, 0],
+    [0.3, 0],
+    [0, 0.5],
+    [0.35, -0.45],
+  ])('recovers 3:1 at yaw %f, pitch %f', (yaw, pitch) => {
+    const { pts, W, H } = project(yaw, pitch);
+    expect(quadAspect(pts, W, H)).toBeCloseTo(3, 2);
+    const s = rectifiedSize(pts, W, H);
+    expect(s.width / s.height).toBeCloseTo(3, 1);
+  });
+});
+
+
+describe('edge bands', () => {
+  // white page, five staff lines, a barline 2 px from the right edge, a 3 px dark band on the right and a top row band
+  const W = 400;
+  const H = 200;
+  const img = createImg(W, H, 230);
+  const set = (x: number, y: number, v: number) => {
+    const o = (y * W + x) * 4;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
+  };
+  for (let l = 0; l < 5; l++) for (let x = 0; x < W; x++) set(x, 60 + l * 10, 20);
+  for (let y = 60; y <= 100; y++) set(W - 6, y, 20); // barline
+  for (let y = 0; y < H; y++) for (let k = 1; k <= 3; k++) set(W - k, y, k === 1 ? 60 : k === 2 ? 110 : 150);
+  for (let x = 0; x < W; x++) set(x, 0, 70);
+  const out = clearEdgeBands(img);
+  const at = (x: number, y: number) => out.data[(y * W + x) * 4];
+
+  it('whitens the dark band and the blended edge', () => {
+    expect([at(W - 1, 150), at(W - 2, 150), at(W - 3, 150)]).toEqual([255, 255, 255]);
+    expect(at(200, 0)).toBe(255);
+  });
+
+  it('keeps staff lines and a barline next to the edge', () => {
+    expect(at(W - 6, 80)).toBe(20);
+    expect(at(200, 60)).toBe(20);
+    expect(at(W - 10, 70)).toBe(20);
+    expect(at(0, 150)).toBe(230); // nothing to clear on the left
   });
 });

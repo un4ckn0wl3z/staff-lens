@@ -1,4 +1,5 @@
 # Runs oemer 0.1.8 step by step and dumps model maps + every intermediate result for the TS port tests.
+# Run: python tools/oemer_reference.py <page.png> <out dir> [title]   (needs oemer 0.1.8; see docs/PHASE2_PLAN.md)
 import sys, os, json, gzip, enum, time
 import numpy as np, cv2
 from oemer import layers, MODULE_PATH
@@ -11,6 +12,7 @@ from oemer.rhythm_extraction import extract as rhythm_extract
 from oemer.build_system import MusicXMLBuilder
 
 img_path, out_dir = sys.argv[1], sys.argv[2]
+title = sys.argv[3] if len(sys.argv) > 3 else 'Aura Lee'
 os.makedirs(out_dir, exist_ok=True)
 maps_path = os.path.join(out_dir, 'maps.npz')
 
@@ -95,7 +97,7 @@ out['notes'] = conv(list(layers.get_layer('notes')))
 out['groups_after_rhythm'] = conv(list(layers.get_layer('note_groups')))
 out['rests_after_rhythm'] = conv(list(layers.get_layer('rests')))
 
-builder = MusicXMLBuilder(title='Aura Lee')
+builder = MusicXMLBuilder(title=title)
 builder.build()
 xml = builder.to_musicxml()
 open(os.path.join(out_dir, 'oemer.musicxml'), 'wb').write(xml)

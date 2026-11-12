@@ -3,11 +3,10 @@
 
 import { esc } from '../explain/format';
 import { t } from '../i18n';
-import { estimateSkew, isFullQuad, rotate, rotate90, warpPerspective, type Img, type Pt } from '../omr/geometry';
+import { clearEdgeBands, estimateSkew, isFullQuad, rectifiedSize, rotate, rotate90, toGray, warpPerspective, type Img, type Pt } from '../omr/geometry';
 import { drawImg, loadImageFile, openPdf, type PdfHandle } from '../omr/imageInput';
 import { LAYER_COLORS, OmrRunner, overlayImage, type ProgressInfo, type Segmentation } from '../omr/runner';
 import { createTesseractEngine, pngCropper, recognizeChords, type ChordHit } from '../omr/chordOcr';
-import { toGray } from '../omr/geometry';
 import type { Quality } from '../omr/tiling';
 import type { StringKey } from '../i18n';
 
@@ -161,8 +160,8 @@ export class ScanView {
 
   private result(): Img | null {
     if (!this.straight) return null;
-    if (isFullQuad(this.corners, this.straight.width, this.straight.height)) return this.straight;
-    return warpPerspective(this.straight, this.corners);
+    if (isFullQuad(this.corners, this.straight.width, this.straight.height)) return clearEdgeBands(this.straight);
+    return clearEdgeBands(warpPerspective(this.straight, this.corners, rectifiedSize(this.corners, this.straight.width, this.straight.height)));
   }
 
   private async action(name: string, _el: HTMLElement): Promise<void> {
