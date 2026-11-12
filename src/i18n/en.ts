@@ -37,6 +37,8 @@ export const en = {
   'omr.step.symbols': 'clefs, keys, accidentals, rests, barlines',
   'omr.step.rhythm': 'note values',
   'omr.step.build': 'bars and pitches',
+  'omr.step.chords': 'chord names (OCR)',
+  'omr.foundChords': 'Chord symbols read: {n}.',
   'omr.found': 'Found {notes} notes in {bars} bars ({s} s, {provider}). Check the result: recognition can make mistakes.',
   'omr.noNotes': 'No notes could be read from this page. Try straightening it or cropping to the music.',
   'omr.buildError': 'The layers were found, but the notes could not be assembled: {msg}',

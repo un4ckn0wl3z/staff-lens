@@ -1,6 +1,6 @@
 // oemer post-processing pipeline: model maps → MusicXML (byte-identical to oemer 0.1.8 without dewarp).
 
-import { buildMusicXml } from './builder';
+import { buildMusicXml, type TimelineEntry } from './builder';
 import { loadSvmBundle, type SvmBundle, type SvmBundleJson } from './classifier';
 import { mapsFromSegmentation, OemerContext } from './context';
 import { extractNoteGroups } from './noteGroup';
@@ -9,8 +9,19 @@ import { extractRhythm } from './rhythm';
 import { extractStaffs } from './staffline';
 import { extractSymbols } from './symbols';
 
+export interface SystemLayout {
+  group: number;
+  /** Top of the system's first staff, page-image pixels. */
+  top: number;
+  left: number;
+  right: number;
+  unit: number;
+}
+
 export interface PostprocessResult {
   musicxml: string;
+  timeline: TimelineEntry[];
+  systems: SystemLayout[];
   notes: number;
   bars: number;
   staves: number;
@@ -29,9 +40,23 @@ export function runPostprocess(width: number, height: number, maps: Uint8Array[]
   onStage?.('rhythm');
   extractRhythm(ctx, staffs, notes, groups, groupMap, noteIdMap, sym.barlines);
   onStage?.('build');
-  const musicxml = buildMusicXml({ staffs, notes, groups, ...sym }, title);
+  const timeline: TimelineEntry[] = [];
+  const musicxml = buildMusicXml({ staffs, notes, groups, ...sym }, title, 90, timeline);
+  const systems = new Map<number, SystemLayout>();
+  for (const st of staffs.flat()) {
+    if (st.group === null) continue;
+    const s = systems.get(st.group);
+    if (!s) systems.set(st.group, { group: st.group, top: st.yUpper, left: st.xLeft, right: st.xRight, unit: st.unitSize });
+    else {
+      s.top = Math.min(s.top, st.yUpper);
+      s.left = Math.min(s.left, st.xLeft);
+      s.right = Math.max(s.right, st.xRight);
+    }
+  }
   return {
     musicxml,
+    timeline,
+    systems: [...systems.values()].sort((a, c) => a.group - c.group),
     notes: (musicxml.match(/<note>/g) ?? []).length,
     bars: (musicxml.match(/<measure /g) ?? []).length,
     staves: staffs[0]?.length ?? 0,

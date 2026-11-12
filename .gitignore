@@ -5,6 +5,9 @@ public/font/
 public/soundfont/
 # oemer ONNX models (~110 MB), downloaded by `npm run fetch-models`
 public/models/
+# Tesseract.js worker, core and English data, copied by tools/copy-ocr.mjs
+public/ocr/
 .claude/
 *.log
 .DS_Store
+*.traineddata

@@ -20,7 +20,7 @@ import { exportPanelHtml, tabPanelHtml } from './ui/forms';
 import { Fretboard, type FretHighlight } from './ui/fretboard';
 import { ScanView, type ScanResult } from './ui/scanView';
 import { editPanelHtml } from './ui/editPanel';
-import { applyEdit, barLengthIssues, beatAt, beatRefOf, defaultWrittenPitch, EditHistory, finishScore, materializeChords, stepPitch, type BeatRef, type EditOp } from './model/edit';
+import { addChordsToScore, applyEdit, barLengthIssues, beatAt, beatRefOf, defaultWrittenPitch, EditHistory, finishScore, materializeChords, stepPitch, type BeatRef, type EditOp } from './model/edit';
 import type { Segmentation } from './omr/runner';
 import { isImageFile } from './omr/imageInput';
 
@@ -75,10 +75,16 @@ export class App {
       (scan, seg) => {
         this.omr = { scan, seg };
       },
-      (xml, name) => {
+      (xml, name, chords) => {
         this.setLoading(true);
-        this.loadBytes(new TextEncoder().encode(xml), name)
-          .then(() => this.toast(t('omr.opened')))
+        // oemer repeats a bar number at system breaks; number bars 1, 2, 3… for display
+        let n = 0;
+        const numbered = xml.replace(/<measure number="\d+"/g, () => `<measure number="${++n}"`);
+        this.loadBytes(new TextEncoder().encode(numbered), name)
+          .then(() => {
+            if (chords.length) this.addRecognizedChords(chords);
+            this.toast(t('omr.opened'));
+          })
           .catch((e) => this.toast(t('open.error', { msg: (e as Error).message }), true))
           .finally(() => this.setLoading(false));
       },
@@ -872,6 +878,15 @@ export class App {
       this.settings.octaveShift[i] = Math.max(-3, Math.min(3, v));
     }
     this.rebuild();
+  }
+
+  /** Puts chord symbols found by OCR onto the beats of the recognised score (not an undoable edit). */
+  private addRecognizedChords(chords: { measure: number; tick: number; text: string }[]): void {
+    if (!this.base || !this.model) return;
+    addChordsToScore(this.base, this.part, chords);
+    this.afterScoreChange(null, null, false);
+    this.history.clear();
+    this.setTab('overview');
   }
 
   // ------------------------------------------------------------ editing

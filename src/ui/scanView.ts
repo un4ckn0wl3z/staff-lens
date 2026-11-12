@@ -6,6 +6,8 @@ import { t } from '../i18n';
 import { estimateSkew, isFullQuad, rotate, rotate90, warpPerspective, type Img, type Pt } from '../omr/geometry';
 import { drawImg, loadImageFile, openPdf, type PdfHandle } from '../omr/imageInput';
 import { LAYER_COLORS, OmrRunner, overlayImage, type ProgressInfo, type Segmentation } from '../omr/runner';
+import { createTesseractEngine, pngCropper, recognizeChords, type ChordHit } from '../omr/chordOcr';
+import { toGray } from '../omr/geometry';
 import type { Quality } from '../omr/tiling';
 import type { StringKey } from '../i18n';
 
@@ -42,7 +44,7 @@ export class ScanView {
   constructor(
     private toast: (msg: string, error?: boolean) => void,
     private onSegmented: ((r: ScanResult, seg: Segmentation) => void) | null = null,
-    private onOpen: ((musicxml: string, fileName: string) => void) | null = null,
+    private onOpen: ((musicxml: string, fileName: string, chords: ChordHit[]) => void) | null = null,
   ) {
     this.root = document.createElement('div');
     this.root.className = 'scan-view';
@@ -210,8 +212,9 @@ export class ScanView {
         if (this.seg?.musicxml && this.onOpen) {
           const name = this.fileName.replace(/\.[^.]+$/, '') + (this.pdf ? `-p${this.page + 1}` : '') + '.musicxml';
           const xml = this.seg.musicxml;
+          const chords = this.seg.chords;
           this.close();
-          this.onOpen(xml, name);
+          this.onOpen(xml, name, chords);
         }
         break;
       case 'show-seg':
@@ -294,17 +297,23 @@ export class ScanView {
     this.root.querySelector<HTMLElement>('.scan-layers')!.hidden = true;
     this.root.classList.add('running');
     this.inferStart = 0;
+    const started = performance.now();
     try {
       const title = this.fileName.replace(/\.[^.]+$/, '') + (this.pdf ? ` (${this.page + 1})` : '');
       const seg = await this.runner.run(image, this.quality, (p) => this.onProgress(p, bar, label), title);
       this.seg = seg;
       this.showSeg = true;
       this.drawSeg();
-      const secs = Math.round(seg.ms / 1000);
       const how = seg.provider === 'webgpu' ? 'WebGPU' : `WASM × ${seg.threads}`;
       const openBtn = this.root.querySelector<HTMLButtonElement>('[data-scan="open"]')!;
+      if (seg.musicxml && seg.notes > 0 && seg.systems.length) {
+        progress.hidden = false;
+        label.textContent = t('omr.building', { step: t('omr.step.chords') });
+        seg.chords = await this.readChords(seg, image);
+      }
+      const secs = Math.round((performance.now() - started) / 1000);
       if (seg.musicxml && seg.notes > 0) {
-        this.status(t('omr.found', { notes: seg.notes, bars: seg.bars, s: secs, provider: how }));
+        this.status(t('omr.found', { notes: seg.notes, bars: seg.bars, s: secs, provider: how }) + ' ' + t('omr.foundChords', { n: seg.chords.length }));
         openBtn.hidden = false;
         openBtn.focus();
       } else {
@@ -319,6 +328,27 @@ export class ScanView {
     } finally {
       progress.hidden = true;
       this.root.classList.remove('running');
+    }
+  }
+
+  /**
+   * Chord-symbol OCR (Tesseract.js, self-hosted files in /ocr/). Reads the prepared page at its own resolution, not
+   * oemer's resampled copy: resampling blurs small italic text.
+   */
+  private async readChords(seg: Segmentation, page: Img): Promise<ChordHit[]> {
+    try {
+      const { width, height, data } = page;
+      const imageData = new ImageData(new Uint8ClampedArray(data), width, height);
+      const base = new URL(import.meta.env.BASE_URL, location.href).href;
+      const engine = await createTesseractEngine(pngCropper(imageData), { workerPath: `${base}ocr/worker.min.js`, corePath: `${base}ocr/core/`, langPath: `${base}ocr/lang` });
+      try {
+        return await recognizeChords(engine, toGray(page), width, height, seg.systems, seg.timeline, width / seg.image.width);
+      } finally {
+        await engine.terminate();
+      }
+    } catch (e) {
+      console.warn('chord OCR failed', e);
+      return [];
     }
   }
 

@@ -212,6 +212,13 @@ export function materializeChords(score: AtScore, part: SLPart): void {
   for (const c of part.chords) placeChord(staff, c);
 }
 
+/** Adds chord symbols (e.g. from OCR) at bar/tick positions of the part. */
+export function addChordsToScore(score: AtScore, part: SLPart, chords: { measure: number; tick: number; text: string }[]): void {
+  const staff = score.tracks[part.trackIndex]?.staves[part.staffIndex];
+  if (!staff) return;
+  for (const c of chords) placeChord(staff, { measure: c.measure, tick: c.tick, absTick: 0, text: c.text, parsed: null });
+}
+
 function placeChord(staff: alphaTab.model.Staff, c: SLChord): void {
   const bar = staff.bars[c.measure];
   const voice = bar?.voices[0];

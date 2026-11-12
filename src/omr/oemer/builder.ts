@@ -442,7 +442,19 @@ export interface BuildInput {
   rests: Rest[];
 }
 
-export function buildMusicXml(input: BuildInput, title = 'Aura Lee', tempo = 90): string {
+/** Where each first-voice beat of track 1 sits on the page: lets chord names found by OCR snap to beats. */
+export interface TimelineEntry {
+  /** System (oemer "group"). */
+  group: number;
+  /** 0-based measure index in the written MusicXML (= alphaTab bar index). */
+  measure: number;
+  /** Horizontal centre on the processed page image. */
+  x: number;
+  /** Start of the beat in the measure, 960 ticks per quarter. */
+  tick: number;
+}
+
+export function buildMusicXml(input: BuildInput, title = 'Aura Lee', tempo = 90, timeline?: TimelineEntry[]): string {
   const { notes } = input;
   const flat = input.staffs.flat();
   const trackNums = new Set(flat.map((s) => s.track)).size;
@@ -565,6 +577,7 @@ export function buildMusicXml(input: BuildInput, title = 'Aura Lee', tempo = 90)
   };
 
   let firstMeasure = true;
+  let measureOrdinal = -1;
   for (const grp of groupKeys) {
     let breakSystem = true;
     for (const m of measures.get(grp)!) {
@@ -576,6 +589,7 @@ export function buildMusicXml(input: BuildInput, title = 'Aura Lee', tempo = 90)
       }
       firstMeasure = false;
       breakSystem = false;
+      measureOrdinal++;
       let lastTidx = 0;
       let lastDura = 0;
       let lastPos = 0;
@@ -615,6 +629,7 @@ export function buildMusicXml(input: BuildInput, title = 'Aura Lee', tempo = 90)
           if (diff > 0 && diff !== lastDura) backup(Math.trunc(diff));
         }
         let voiceOne: boolean;
+        if (dura === minDura && !minAdded[track] && track === 0) timeline?.push({ group: grp, measure: measureOrdinal, x: symX(s), tick: total[track] * (960 / DIV) });
         if (dura === minDura && !minAdded[track]) {
           total[track] += minDura;
           minAdded[track] = true;

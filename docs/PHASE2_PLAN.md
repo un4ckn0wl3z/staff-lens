@@ -30,7 +30,7 @@ file (jpg/png/webp/pdf)
 | M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | done (see note) |
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
 | M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | done |
-| M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
+| M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | done (see note) |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
 M1, M2 and M3 are independent of each other.
@@ -46,6 +46,20 @@ M1, M2 and M3 are independent of each other.
   voice 1 does not add up to the time signature are listed (on the Aura Lee scan it finds exactly the two misread
   bars). Real confidence highlighting needs scores from the models; revisit if the post-processing keeps the
   per-pixel probabilities.
+
+## M5 notes
+
+- `src/omr/chordOcr.ts`: for each system, the band from 4.5 to 0.15 staff spaces above the top line is split into
+  word-sized blobs of dark pixels; each blob is read by Tesseract.js (LSTM, single-word mode, English data
+  `4.0.0_best_int`). Words that parse as chord symbols (after small repairs, such as an italic 7 read as `/` or `z`)
+  are snapped to the nearest voice-1 beat of that system (the builder records each beat's x position).
+- Words below confidence 30 are dropped rather than marked: the editor's chord field fixes any that are missed.
+- OCR runs on the prepared page at its own resolution (oemer's resampled copy blurs small italic text); layout
+  coordinates are scaled to it. In the browser each blob is sent to Tesseract as a small PNG (it cannot read ImageData).
+- Tesseract files are self-hosted under `public/ocr/` (copied from `node_modules` by `tools/copy-ocr.mjs` before
+  dev and build), so the app makes no third-party requests.
+- On open, bars are renumbered 1, 2, 3… (oemer repeats a number at system breaks) and the chords are put on the beats.
+- Aura Lee: all 13 chord symbols in the right bars and beats (node test and browser).
 
 ## M3 results (2026-11-12)
 

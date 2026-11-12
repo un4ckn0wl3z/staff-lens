@@ -39,6 +39,8 @@ export const th: Record<keyof typeof en, string> = {
   'omr.step.symbols': 'กุญแจ เครื่องหมายประจำกุญแจ ชาร์ป/แฟลต ตัวหยุด เส้นกั้นห้อง',
   'omr.step.rhythm': 'ความยาวโน้ต',
   'omr.step.build': 'ห้องและระดับเสียง',
+  'omr.step.chords': 'ชื่อคอร์ด (OCR)',
+  'omr.foundChords': 'อ่านชื่อคอร์ดได้ {n} ตัว',
   'omr.found': 'พบโน้ต {notes} ตัวใน {bars} ห้อง ({s} วินาที, {provider}) โปรดตรวจผล ระบบอาจอ่านผิดได้',
   'omr.noNotes': 'อ่านโน้ตจากหน้านี้ไม่ได้ ลองจัดให้ตรงหรือครอปเฉพาะส่วนที่เป็นโน้ต',
   'omr.buildError': 'พบชั้นข้อมูลแล้ว แต่ประกอบเป็นโน้ตไม่สำเร็จ: {msg}',
