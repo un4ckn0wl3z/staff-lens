@@ -18,6 +18,8 @@ import type { OptimizerMode } from './theory/optimizer';
 import { spellMidi, spn } from './theory/pitch';
 import { exportPanelHtml, tabPanelHtml } from './ui/forms';
 import { Fretboard, type FretHighlight } from './ui/fretboard';
+import { ScanView } from './ui/scanView';
+import { isImageFile } from './omr/imageInput';
 
 type PanelTab = 'overview' | 'note' | 'chord' | 'tab' | 'export';
 type View = 'both' | 'staff' | 'tab';
@@ -54,10 +56,12 @@ export class App {
   private octaveScope: 'part' | 'selection' = 'part';
   private lastPointer: { x: number; y: number; clientX: number; clientY: number } | null = null;
   private fretboard!: Fretboard;
+  private scan!: ScanView;
   private playingIds: string[] = [];
   private asciiCache = '';
 
   start(): void {
+    this.scan = new ScanView((m, e) => this.toast(m, e), null);
     this.fretboard = new Fretboard($('#fretboard'), (pos, midi) => this.onFretPick(pos, midi));
     this.setupAlphaTab();
     this.bindChrome();
@@ -206,6 +210,10 @@ export class App {
   }
 
   async loadFile(file: File): Promise<void> {
+    if (isImageFile(file.name) || file.type.startsWith('image/') || file.type === 'application/pdf') {
+      await this.scan.open(file);
+      return;
+    }
     this.setLoading(true);
     try {
       await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name);
@@ -814,6 +822,12 @@ export class App {
       if (f) this.loadFile(f);
       fileInput.value = '';
     });
+    const imageInput = $<HTMLInputElement>('#image-input');
+    imageInput.addEventListener('change', () => {
+      const f = imageInput.files?.[0];
+      if (f) void this.scan.open(f);
+      imageInput.value = '';
+    });
     document.querySelectorAll<HTMLButtonElement>('[data-demo]').forEach((b) =>
       b.addEventListener('click', () => this.loadUrl(`${BASE}samples/${b.dataset.demo}.musicxml`, `${b.dataset.demo}.musicxml`)),
     );
@@ -936,6 +950,7 @@ export class App {
 
     // keyboard
     document.addEventListener('keydown', (e) => {
+      if (this.scan.isOpen) return;
       const target = e.target as HTMLElement;
       const typing = target.closest('input, select, textarea, [contenteditable]');
       if (e.key === 'Escape') this.closePopover();

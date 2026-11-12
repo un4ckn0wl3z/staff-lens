@@ -36,7 +36,10 @@
         </label>
         <button class="btn" data-demo="aura-lee" data-i18n="open.demo">Demo: Aura Lee</button>
         <button class="btn" data-demo="chord-study" data-i18n="open.demo2">Demo: Chord study</button>
-        <button class="btn" disabled data-i18n="open.image">Image / PDF (coming soon)</button>
+        <label class="btn file-btn">
+          <input id="image-input" type="file" accept="image/*,.pdf,application/pdf" />
+          <span data-i18n="open.image">Image / PDF</span>
+        </label>
         <button class="btn ghost" id="lang-btn" lang="th">ภาษาไทย</button>
         <button class="btn ghost icon" id="theme-btn" data-i18n-title="theme.toggle" data-i18n-aria="theme.toggle">◐</button>
       </div>

@@ -857,6 +857,105 @@ body.dragging .drop-overlay {
   pointer-events: none;
 }
 
+/* ---------------- scan view ---------------- */
+.scan-view {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px 12px;
+  gap: 6px;
+}
+.scan-view[hidden] {
+  display: none;
+}
+.scan-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.scan-head h2 {
+  font-size: 1.15rem;
+}
+.scan-head .btn {
+  margin-left: auto;
+}
+.scan-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scan-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.scan-tools .spacer {
+  flex: 1;
+}
+.scan-tools .field.inline {
+  margin: 0;
+}
+.scan-tools .btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.scan-hint {
+  margin: 0;
+}
+.scan-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.scan-frame {
+  position: relative;
+  line-height: 0;
+}
+.scan-frame canvas {
+  max-width: 100%;
+  max-height: calc(100vh - 270px);
+  box-shadow: var(--shadow);
+  background: #fff;
+}
+.scan-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  overflow: visible;
+}
+.scan-quad {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  stroke: var(--accent);
+}
+.scan-handle {
+  fill: color-mix(in srgb, var(--surface) 70%, transparent);
+  stroke: var(--accent);
+  cursor: grab;
+}
+.scan-handle:focus-visible {
+  outline: none;
+  fill: var(--select);
+}
+.scan-status {
+  margin: 0;
+}
+.scan-view.busy .scan-stage {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 /* ---------------- responsive ---------------- */
 @media (max-width: 900px) {
   .workspace {
