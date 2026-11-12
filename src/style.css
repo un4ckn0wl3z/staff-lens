@@ -443,6 +443,12 @@ body.loading .score-area::after {
   margin: 0;
   padding-left: 18px;
 }
+.detail {
+  color: var(--muted);
+  font-size: 0.9em;
+  border-left: 3px solid var(--accent-soft);
+  padding-left: 8px;
+}
 .info-block {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);

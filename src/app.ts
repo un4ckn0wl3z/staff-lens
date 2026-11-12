@@ -8,6 +8,7 @@ import { analyze, chordHtml, noteHtml, overviewHtml, type Analysis } from './exp
 import { getLang, onLangChange, setLang, t, translateDom } from './i18n';
 import { arrange, DEFAULT_TAB_SETTINGS, type Arrangement, type TabSettings } from './model/arrangement';
 import { fromAlphaTab } from './model/fromAlphaTab';
+import { readMxlScoreXml } from './model/mxl';
 import { parseMusicXmlHarmony } from './model/musicxmlHarmony';
 import type { SLNote, SLScore } from './model/score';
 import { buildRenderScore, idForRenderedNote, type RenderScore } from './model/toAlphaTab';
@@ -97,6 +98,8 @@ export class App {
         enableCursor: true,
         enableAnimatedBeatCursor: true,
         enableUserInteraction: true,
+        enablePlaybackRangeSelection: true,
+        resetPlaybackRangeOnClick: false,
         scrollOffsetY: -40,
       },
     } as alphaTab.json.SettingsJson);
@@ -151,6 +154,23 @@ export class App {
       this.playingIds = ids;
       this.updateFretboard();
     });
+    // Drag across the score to choose the loop bars.
+    this.api.playbackRangeHighlightChanged.on((e) => {
+      if (!e.startBeat || !e.endBeat) return;
+      const a = e.startBeat.voice.bar.index;
+      const b = e.endBeat.voice.bar.index;
+      this.pendingLoop = [Math.min(a, b) + 1, Math.max(a, b) + 1];
+    });
+    this.api.playbackRangeChanged.on((e) => {
+      if (this.applyingLoop) return;
+      if (e.playbackRange && this.pendingLoop) {
+        this.loop = { on: true, from: this.pendingLoop[0], to: this.pendingLoop[1] };
+        this.syncLoopInputs();
+        this.applyLoop();
+        if (this.tab === 'tab') this.renderPanel();
+      }
+      this.pendingLoop = null;
+    });
     this.api.error.on((err) => this.toast(t('open.error', { msg: err.message ?? String(err) }), true));
   }
 
@@ -200,7 +220,10 @@ export class App {
     const ext = fileName.toLowerCase().split('.').pop() ?? '';
     const kind: SLScore['source']['kind'] = ext === 'mxl' ? 'mxl' : ext === 'xml' || ext === 'musicxml' ? 'musicxml' : ['gp', 'gpx', 'gp5', 'gp4', 'gp3'].includes(ext) ? 'guitarpro' : 'other';
     const at = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes, this.api.settings);
-    const harmony = kind === 'musicxml' ? parseMusicXmlHarmony(new TextDecoder().decode(bytes)) : null;
+    let xmlText: string | null = null;
+    if (kind === 'musicxml') xmlText = new TextDecoder().decode(bytes);
+    else if (kind === 'mxl') xmlText = await readMxlScoreXml(bytes);
+    const harmony = xmlText ? parseMusicXmlHarmony(xmlText) : null;
     const model = fromAlphaTab(at, { kind, fileName }, harmony);
     if (model.parts.length === 0) throw new Error('no pitched notes found');
     this.base = at;
@@ -296,11 +319,24 @@ export class App {
     if (acc) this.api.changeTrackMute([acc], this.mix === 'melody');
   }
 
+  private pendingLoop: [number, number] | null = null;
+  private applyingLoop = false;
+
   private applyLoop(): void {
+    this.applyingLoop = true;
+    try {
+      this.applyLoopInner();
+    } finally {
+      this.applyingLoop = false;
+    }
+  }
+
+  private applyLoopInner(): void {
     const score = this.render?.score;
     const cache = this.api.tickCache;
     if (!score || !cache || !this.loop.on) {
       this.api.playbackRange = null;
+      this.api.clearPlaybackRangeHighlight();
       this.api.isLooping = false;
       return;
     }
@@ -334,9 +370,36 @@ export class App {
         }
       }
     }
-    if (!best || bestD > 28) return;
+    if (!best || bestD > 28) {
+      // Click above the top staff of the system: the chord-symbol row.
+      const top = Math.min(...entries.map((e) => e.barBounds.visualBounds.y));
+      if (lp.y < top + 6) this.onScoreChordClick(beat);
+      return;
+    }
     const onTab = this.view === 'tab' || (this.view === 'both' && entries.length > 1 && bestEntryY >= Math.max(...entries.map((e) => e.visualBounds.y)));
     this.onScoreNoteClick(best, onTab);
+  }
+
+  /** Opens the chord panel for the chord symbol at (or in force at) the clicked beat. */
+  private onScoreChordClick(beat: alphaTab.model.Beat): void {
+    if (!this.model) return;
+    const measure = beat.voice.bar.index;
+    const m = this.model.measures[measure];
+    if (!m) return;
+    const chords = this.part.chords;
+    let idx = chords.findIndex((c) => c.measure === measure && c.tick === beat.displayStart);
+    if (idx < 0) {
+      // nearest chord symbol in this bar at or before the beat
+      for (let i = 0; i < chords.length; i++) if (chords[i].measure === measure && chords[i].tick <= beat.displayStart) idx = i;
+    }
+    if (idx < 0) return;
+    this.selectedChord = idx;
+    this.setTab('chord');
+    const c = chords[idx].parsed;
+    if (c) {
+      const shape = chordShapes(c, 1)[0];
+      playPreview(this.api, strum(shape ? shapePitches(shape) : simpleVoicing(c)), this.program);
+    }
   }
 
   private onScoreNoteClick(note: alphaTab.model.Note, onTab: boolean): void {
@@ -541,7 +604,7 @@ export class App {
     let html = '';
     switch (this.tab) {
       case 'overview':
-        html = `<h2>${esc(this.model.title)}</h2>${this.model.composer ? `<p class="muted">${esc(this.model.composer)}</p>` : ''}` + overviewHtml(this.an, this.arr, this.settings);
+        html = `<h2>${esc(this.model.title)}</h2>${this.model.composer ? `<p class="muted">${esc(this.model.composer)}</p>` : ''}` + overviewHtml(this.an, this.arr, this.settings, this.detailed);
         break;
       case 'note': {
         const sl = this.selectedId ? this.part.notes.find((n) => n.id === this.selectedId) : null;
@@ -549,7 +612,7 @@ export class App {
         break;
       }
       case 'chord':
-        html = this.selectedChord !== null ? chordHtml(this.an, this.selectedChord) : `<p class="muted">${esc(t('chord.selectHint'))}</p>`;
+        html = this.selectedChord !== null ? chordHtml(this.an, this.selectedChord, this.detailed) : `<p class="muted">${esc(t('chord.selectHint'))}</p>`;
         break;
       case 'tab':
         html =

@@ -52,6 +52,14 @@ export function intervalBetween(a: SpelledPitch, b: SpelledPitch): Interval {
   };
 }
 
+/** Inversion of a simple interval (P4 ↔ P5, M3 ↔ m6, A4 ↔ d5). Compound intervals are reduced first. */
+export function invertInterval(iv: Interval): { number: number; quality: IntervalQuality } {
+  const simple = ((iv.number - 1) % 7) + 1;
+  const number = simple === 1 ? 8 : 9 - simple;
+  const swap: Record<IntervalQuality, IntervalQuality> = { P: 'P', M: 'm', m: 'M', A: 'd', d: 'A', AA: 'dd', dd: 'AA' };
+  return { number, quality: swap[iv.quality] };
+}
+
 export function ordinal(n: number): string {
   const s = n % 100;
   if (s >= 11 && s <= 13) return `${n}th`;

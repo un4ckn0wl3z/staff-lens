@@ -26,10 +26,11 @@ staff image/PDF/MusicXML → StaffLens → .gp5 → Riff Forge → Tempo Bench
   - where the sharp or flat comes from: key signature, a printed accidental, or one carried within the bar ("This F is played as F♯ because of the key signature");
   - the interval from the previous note, its scale degree in the detected key, and its role against the active chord (chord tone, or passing/neighbour/… non-chord tone);
   - **every playable fretboard position** (frets 0–15), the one used in the tab, the suggested finger, and a mini fretboard;
-  - a Beginner / Detailed toggle.
-- **Click a chord** for strum and arpeggio playback, its formula and notes (`E7 = 1-3-5-♭7 = E G♯ B D`), what the suffix means, its function in the key (V7 → I, secondary dominants such as V7/vi), and open or barre chord diagrams.
+  - where it sits on the staff (line or space, ledger lines);
+  - a Beginner / Detailed toggle. Detailed adds MIDI number and frequency, length in seconds, interval symbol and inversion, the full scale, the accidental rule and the chord's notes.
+- **Click a chord symbol** (in the score or the overview) for strum and arpeggio playback, its formula and notes (`E7 = 1-3-5-♭7 = E G♯ B D`), what the suffix means, its function in the key (V7 → I, secondary dominants such as V7/vi), and open or barre chord diagrams.
 - **Staff → tab conversion** with a fingering optimizer (see below): Open position (default), Stay in position N, Minimize movement; tuning presets (Standard, Drop D, DADGAD, Half-step down); capo 0–9; a beginner high-fret penalty; **lock** any note by clicking its tab number and choosing a string from the popover, and the rest is re-optimized around it; a **range check** marks notes the guitar cannot play in red, with octave shift for the whole part or the looped bars (non-guitar parts are shifted automatically when that helps); optional **"Add bass from chords"** for a simple fingerstyle arrangement.
-- **Playback**: play/pause/stop, play from the selected note (clicking the score also moves the cursor), bar-range loop, tempo 50–150 % without pitch change, metronome, count-in, a generated chord accompaniment (strum track) with a melody/chords mix, nylon or steel guitar sound.
+- **Playback**: play/pause/stop, play from the selected note (clicking the score also moves the cursor), bar-range loop (type the bars or drag across the score), tempo 50–150 % without pitch change, metronome, count-in, a generated chord accompaniment (strum track) with a melody/chords mix, nylon or steel guitar sound.
 - **Interactive fretboard** under the score: shows the selected note's positions and the notes being played; clicking a fret plays the pitch and highlights matching notes in the score.
 - **Export**: Guitar Pro 5 (`.gp5`), Guitar Pro 7+ (`.gp`), MIDI, ASCII tab (4 bars per line, aligned columns, also copy to clipboard), PNG, and Print/PDF through the browser print stylesheet.
 - Thai and English UI, light and dark theme, responsive down to phone width, keyboard navigation (← → between notes, Space to play/pause), installable PWA that works offline.
@@ -104,7 +105,7 @@ tests/           Vitest unit + pipeline tests, Aura Lee fixture
 
 ### Known limitations
 
-- Chord symbols from compressed `.mxl` files come from alphaTab, which drops the bass note of slash chords. Uncompressed MusicXML is read directly and keeps it.
+- Chord symbols are read straight from the MusicXML `<harmony>` elements (also inside `.mxl`, unzipped in the browser), so slash chords keep their bass note. Guitar Pro files use alphaTab's chords or chord-like beat text.
 - The chord accompaniment is a simple down-strum on every beat using the first chord shape.
 - After a D.C./D.S. jump, repeats are not taken again (the common convention).
 - The PNG export uses the current theme's colours.

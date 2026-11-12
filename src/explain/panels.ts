@@ -16,10 +16,10 @@ import {
 import { chordShapes } from '../theory/chordShapes';
 import { beatPosition, beatsIn, beatUnit, isCompound } from '../theory/duration';
 import { positionsFor } from '../theory/fretboard';
-import { intervalBetween } from '../theory/interval';
-import { detectKey, majorKeyFor, minorKeyFor, scaleDegree, type Key, type KeyDetection } from '../theory/key';
-import { accidentalText, keySignatureSteps, mod, pcOf, pitchClassName, spellMidi, spn } from '../theory/pitch';
-import { playOrder, type JumpMarker, type TargetMarker } from '../theory/repeats';
+import { intervalBetween, invertInterval, type Interval } from '../theory/interval';
+import { detectKey, majorKeyFor, minorKeyFor, scaleDegree, scaleOf, type Key, type KeyDetection } from '../theory/key';
+import { accidentalText, diatonicIndex, keySignatureSteps, mod, pcOf, pitchClassName, spellMidi, spn, transposePitchClass, type SpelledPitch } from '../theory/pitch';
+import { formatPlayOrder, playOrder, type JumpMarker, type TargetMarker } from '../theory/repeats';
 import { chordDiagramSvg, miniFretboardSvg } from '../ui/svg';
 import { durationLabel, esc, intervalLabel, keyLabel, listJoin, numberLabel, unitLabel } from './format';
 
@@ -56,6 +56,47 @@ function section(title: string, body: string): string {
 }
 
 const p = (s: string) => `<p>${s}</p>`;
+const detail = (s: string) => `<p class="detail">${s}</p>`;
+
+/** Bottom staff line of each clef (treble E4, bass G2, alto F3, tenor D3). */
+const BOTTOM_LINE: Record<string, SpelledPitch> = {
+  treble: { step: 'E', alter: 0, octave: 4 },
+  bass: { step: 'G', alter: 0, octave: 2 },
+  alto: { step: 'F', alter: 0, octave: 3 },
+  tenor: { step: 'D', alter: 0, octave: 3 },
+};
+
+/** Where a written note sits on a 5-line staff, in words. */
+export function staffPositionText(written: SpelledPitch, clef: string): string | null {
+  const bottom = BOTTOM_LINE[clef];
+  if (!bottom) return null;
+  const idx = diatonicIndex(written) - diatonicIndex(bottom);
+  if (idx >= 0 && idx <= 8) return idx % 2 === 0 ? t('staff.line', { n: idx / 2 + 1 }) : t('staff.space', { n: (idx + 1) / 2 });
+  if (idx === -1) return t('staff.below1');
+  if (idx === 9) return t('staff.above1');
+  if (idx < 0) return t('staff.ledgerBelow', { n: Math.floor(-idx / 2) });
+  return t('staff.ledgerAbove', { n: Math.floor((idx - 8) / 2) });
+}
+
+const hz = (midi: number) => (440 * Math.pow(2, (midi - 69) / 12)).toFixed(1);
+
+function tempoAt(score: SLScore, measure: number): number {
+  let bpm = score.tempo;
+  for (const m of score.measures) {
+    if (m.index > measure) break;
+    if (m.tempo !== null) bpm = m.tempo;
+  }
+  return bpm;
+}
+
+function invertedLabel(iv: Interval): string {
+  const inv = invertInterval(iv);
+  return intervalLabel({ ...iv, number: inv.number, simpleNumber: inv.number, quality: inv.quality, octaves: 0 });
+}
+
+function scaleText(key: Key): string {
+  return t('detail.scale', { key: keyLabel(key), notes: scaleOf(key).map((x) => pitchClassName(x)).join(' ') });
+}
 
 function tempoName(bpm: number): string {
   const k: StringKey = bpm < 50 ? 'tempo.veryslow' : bpm < 76 ? 'tempo.slow' : bpm < 108 ? 'tempo.walking' : bpm < 120 ? 'tempo.moderate' : bpm < 168 ? 'tempo.fast' : 'tempo.veryfast';
@@ -64,7 +105,7 @@ function tempoName(bpm: number): string {
 
 // ---------------------------------------------------------------- overview
 
-export function overviewHtml(an: Analysis, arr: Arrangement | null, settings: TabSettings): string {
+export function overviewHtml(an: Analysis, arr: Arrangement | null, settings: TabSettings, detailed = false): string {
   const { score, part } = an;
   const out: string[] = [];
   const first = score.measures[0];
@@ -87,6 +128,11 @@ export function overviewHtml(an: Analysis, arr: Arrangement | null, settings: Ta
   const reasons = an.detection.reasons.map((r) => t(`key.reason.${r}` as StringKey, { tonic, lt }));
   let keyBody = p(keyHtml) + p(`<strong>${esc(t('key.likely', { key: keyLabel(an.key), reasons: listJoin(reasons) }))}</strong>`);
   if (fifths !== 0) keyBody += p(esc(t('key.applies')));
+  if (detailed) {
+    const [maj, min] = an.detection.candidates;
+    keyBody += detail(esc(t('detail.keyScores', { major: keyLabel(maj), a: an.detection.scores[0], minor: keyLabel(min), b: an.detection.scores[1] })));
+    keyBody += detail(esc(scaleText(an.key)));
+  }
   out.push(section(t('ov.key'), keyBody));
 
   // Time
@@ -98,6 +144,7 @@ export function overviewHtml(an: Analysis, arr: Arrangement | null, settings: Ta
       : t('time.simple', { num: ts.numerator, den: ts.denominator, unit: unitLabel(ts.denominator) });
     const changes = score.measures.filter((m, i) => i > 0 && (m.timeSignature.numerator !== score.measures[i - 1].timeSignature.numerator || m.timeSignature.denominator !== score.measures[i - 1].timeSignature.denominator));
     let body = p(esc(text));
+    if (detailed) body += detail(esc(t('detail.barSeconds', { s: ((first.ticks / 960) * (60 / score.tempo)).toFixed(1) })));
     if (changes.length) body += p(changes.map((m) => `${esc(t('note.bar', { bar: m.index + 1 }))}: ${m.timeSignature.numerator}/${m.timeSignature.denominator}`).join(' · '));
     out.push(section(t('ov.time'), body));
   }
@@ -143,7 +190,10 @@ export function overviewHtml(an: Analysis, arr: Arrangement | null, settings: Ta
   out.push(
     section(
       t('ov.order'),
-      p(esc(t('order.hint'))) + `<div class="order-map">${chips}</div>` + p(`<small>${esc(t('order.total', { n: an.order.length, printed: score.measures.length }))}</small>`),
+      p(esc(t('order.hint'))) +
+        `<div class="order-map">${chips}</div>` +
+        p(`<small>${esc(t('order.total', { n: an.order.length, printed: score.measures.length }))}</small>`) +
+        (detailed ? detail(esc(t('detail.order', { order: formatPlayOrder(an.order) }))) : ''),
     ),
   );
 
@@ -198,7 +248,10 @@ export function noteHtml(an: Analysis, note: SLNote, arr: Arrangement | null, se
   name += `<p class="muted">${esc(t('note.bar', { bar: note.measure + 1 }))}</p>`;
   name += p(esc(part.octaveTransposed || part.clef === 'treble' ? t('note.guitarOctave', { written: spn(note.written), sounding: spn(sounding) }) : t('note.nonGuitar', { sounding: spn(sounding) })));
   if (shift) name += p(esc(t('note.shifted', { shift: (shift > 0 ? '+' : '') + shift })));
+  if (detailed) name += detail(esc(t('detail.pitch', { midi: guitarMidi, hz: hz(guitarMidi) })));
   out.push(`<section class="info-block">${name}</section>`);
+  const where = staffPositionText(note.written, part.clef);
+  if (where) out.push(section(t('staff.where'), p(esc(where))));
 
   // Duration and beat
   const ts = m.timeSignature;
@@ -209,7 +262,9 @@ export function noteHtml(an: Analysis, note: SLNote, arr: Arrangement | null, se
   const posKey: Record<string, StringKey> = { '': 'note.beat', '&': 'note.beatAnd', e: 'note.beatE', a: 'note.beatA', trip: 'note.beatTrip', let: 'note.beatLet', other: 'note.beatOther' };
   dur += '<br>' + esc(t(posKey[pos.syllable], { beat: pos.beat, frac: numberLabel(pos.offset) }));
   if (note.isTieDestination) dur += '<br>' + esc(t('note.tied'));
-  out.push(section(t('note.length'), p(dur)));
+  const bpm = tempoAt(score, note.measure);
+  const secs = detailed ? detail(esc(t('detail.seconds', { bpm: Math.round(bpm), s: ((note.durationTicks / 960) * (60 / bpm)).toFixed(2) }))) : '';
+  out.push(section(t('note.length'), p(dur) + secs));
 
   // Accidental source
   const barNotes = notesInOrder(part).filter((n) => n.measure === note.measure);
@@ -239,19 +294,21 @@ export function noteHtml(an: Analysis, note: SLNote, arr: Arrangement | null, se
         text = t('acc.tied', { name: nm });
         break;
     }
-    out.push(section(t('note.accidental'), p(esc(text))));
+    out.push(section(t('note.accidental'), p(esc(text)) + (detailed && info.source !== 'none' ? detail(esc(t('detail.accRule'))) : '')));
   }
 
   // Interval from previous melody note
   const prev = previousMelodyNote(part, note);
   let ivText: string;
+  let ivDetail = '';
   if (!prev) ivText = t('interval.first');
   else {
     const iv = intervalBetween(prev.written, note.written);
+    if (detailed && iv.direction !== 'same') ivDetail = detail(esc(t('detail.interval', { short: `${iv.quality}${iv.number}`, inv: invertedLabel(iv) })));
     if (iv.direction === 'same') ivText = t('interval.same', { prev: spn(prev.written) });
     else ivText = t(iv.direction === 'up' ? 'interval.up' : 'interval.down', { name: intervalLabel(iv), prev: spn(prev.written), semis: iv.semitones, semiWord: t(iv.semitones === 1 ? 'unit.semitone' : 'unit.semitones') });
   }
-  out.push(section(t('note.interval'), p(esc(ivText))));
+  out.push(section(t('note.interval'), p(esc(ivText)) + ivDetail));
 
   // Scale degree
   const deg = scaleDegree(note.written, an.key);
@@ -262,6 +319,7 @@ export function noteHtml(an: Analysis, note: SLNote, arr: Arrangement | null, se
   } else {
     degText = esc(t('degree.chromaticText', { label: deg.label, key: keyLabel(an.key) })) + '<br>' + esc(t('degree.chromatic', { key: keyLabel(an.key) }));
   }
+  if (detailed) degText += detail(esc(scaleText(an.key)));
   out.push(section(t('note.degree'), p(degText)));
 
   // Chord context
@@ -280,6 +338,10 @@ export function noteHtml(an: Analysis, note: SLNote, arr: Arrangement | null, se
       chordText = t('nonchord.text', { chord: '\u0000', name: pitchClassName(note.written), type: t(`nonchord.${type}` as StringKey) });
     }
     chordText = esc(chordText).replace('\u0000', link);
+    if (detailed) {
+      const notes = chordNotes(chord.parsed).map((x) => pitchClassName(x)).join(' ');
+      chordText += detail(esc(t('detail.chordNotes', { chord: chord.text, notes, formula: chordFormula(chord.parsed) })));
+    }
   }
   out.push(section(t('note.chord'), p(chordText)));
 
@@ -320,7 +382,7 @@ function positionsHtml(note: SLNote, guitarMidi: number, arr: Arrangement | null
 
 // ---------------------------------------------------------------- chord
 
-export function chordHtml(an: Analysis, index: number): string {
+export function chordHtml(an: Analysis, index: number, detailed = false): string {
   const c = an.part.chords[index];
   if (!c) return p(esc(t('chord.selectHint')));
   if (!c.parsed) return p(esc(t('chord.unknown', { text: c.text })));
@@ -336,6 +398,18 @@ export function chordHtml(an: Analysis, index: number): string {
       `</section>`,
   );
   let sym = p(esc(t(`suffix.${chord.quality}` as StringKey)));
+  if (detailed) {
+    const root: SpelledPitch = { ...chord.root, octave: 4 };
+    const list = chord.degrees
+      .slice(1)
+      .map((d) => {
+        const pc = transposePitchClass(chord.root, d.semitones, d.steps);
+        const top: SpelledPitch = { ...pc, octave: 4 + Math.floor((diatonicIndex({ ...chord.root, octave: 0 }) + d.steps) / 7) + (d.semitones >= 12 ? 1 : 0) };
+        return `${pitchClassName(pc)} = ${intervalLabel(intervalBetween(root, top))}`;
+      })
+      .join(', ');
+    sym += detail(esc(t('detail.tones', { list })));
+  }
   if (chord.bass) sym += p(esc(t('chord.slash', { bass: pitchClassName(chord.bass) })));
   out.push(section(t('chord.symbol'), sym));
 
