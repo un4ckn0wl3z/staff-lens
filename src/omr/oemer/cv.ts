@@ -451,3 +451,99 @@ export function houghLinesP(src: Raster, rho: number, theta: number, threshold: 
   }
   return lines;
 }
+
+// ------------------------------------------------------------------ cv2.line (8-connected)
+
+/** OpenCV clipLine for integer points; returns null when the segment misses the image. */
+function clipLine(w: number, h: number, p1: [number, number], p2: [number, number]): [[number, number], [number, number]] | null {
+  if (w <= 0 || h <= 0) return null;
+  const right = w - 1;
+  const bottom = h - 1;
+  let [x1, y1] = p1;
+  let [x2, y2] = p2;
+  let c1 = +(x1 < 0) + +(x1 > right) * 2 + +(y1 < 0) * 4 + +(y1 > bottom) * 8;
+  let c2 = +(x2 < 0) + +(x2 > right) * 2 + +(y2 < 0) * 4 + +(y2 > bottom) * 8;
+  if ((c1 & c2) === 0 && (c1 | c2) !== 0) {
+    let a: number;
+    if (c1 & 12) {
+      a = c1 < 8 ? 0 : bottom;
+      x1 += Math.trunc(((a - y1) * (x2 - x1)) / (y2 - y1));
+      y1 = a;
+      c1 = +(x1 < 0) + +(x1 > right) * 2;
+    }
+    if (c2 & 12) {
+      a = c2 < 8 ? 0 : bottom;
+      x2 += Math.trunc(((a - y2) * (x2 - x1)) / (y2 - y1));
+      y2 = a;
+      c2 = +(x2 < 0) + +(x2 > right) * 2;
+    }
+    if ((c1 & c2) === 0 && (c1 | c2) !== 0) {
+      if (c1) {
+        a = c1 === 1 ? 0 : right;
+        y1 += Math.trunc(((a - x1) * (y2 - y1)) / (x2 - x1));
+        x1 = a;
+        c1 = 0;
+      }
+      if (c2) {
+        a = c2 === 1 ? 0 : right;
+        y2 += Math.trunc(((a - x2) * (y2 - y1)) / (x2 - x1));
+        x2 = a;
+        c2 = 0;
+      }
+    }
+  }
+  return (c1 | c2) === 0 ? [
+    [x1, y1],
+    [x2, y2],
+  ] : null;
+}
+
+/** cv2.line(img, p1, p2, value, 1) on a non-8-bit canvas: OpenCV's 8-connected LineIterator. */
+export function drawLine8(img: Raster, x1: number, y1: number, x2: number, y2: number, value = 1): void {
+  let p1: [number, number] = [x1, y1];
+  let p2: [number, number] = [x2, y2];
+  const inside = (p: [number, number]) => p[0] >= 0 && p[1] >= 0 && p[0] < img.width && p[1] < img.height;
+  if (!inside(p1) || !inside(p2)) {
+    const c = clipLine(img.width, img.height, p1, p2);
+    if (!c) return;
+    [p1, p2] = c;
+  }
+  let dx = p2[0] - p1[0];
+  let dy = p2[1] - p1[1];
+  let deltaX = 1;
+  let deltaY = 1;
+  if (dx < 0) {
+    dx = -dx;
+    dy = -dy;
+    [p1, p2] = [p2, p1];
+  }
+  if (dy < 0) {
+    dy = -dy;
+    deltaY = -1;
+  }
+  const vert = dy > dx;
+  if (vert) {
+    [dx, dy] = [dy, dx];
+    [deltaX, deltaY] = [deltaY, deltaX];
+  }
+  let err = dx - (dy + dy);
+  const plusDelta = dx + dx;
+  const minusDelta = -(dy + dy);
+  let minusShift = deltaX;
+  let plusShift = 0;
+  let minusStep = 0;
+  let plusStep = deltaY;
+  const count = dx + 1;
+  if (vert) {
+    [plusStep, plusShift] = [plusShift, plusStep];
+    [minusStep, minusShift] = [minusShift, minusStep];
+  }
+  let [x, y] = p1;
+  for (let i = 0; i < count; i++) {
+    img.data[y * img.width + x] = value;
+    const mask = err < 0 ? -1 : 0;
+    err += minusDelta + (plusDelta & mask);
+    x += minusShift + (plusShift & mask);
+    y += minusStep + (plusStep & mask);
+  }
+}

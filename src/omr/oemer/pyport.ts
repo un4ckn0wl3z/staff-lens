@@ -83,6 +83,157 @@ export function cpythonSetPop(sortedInts: number[], remove0 = true): number | un
   return undefined;
 }
 
+// ------------------------------------------------------------------ CPython set of ints
+
+const DUMMY = Symbol('dummy');
+type Slot = number | null | typeof DUMMY;
+const MASK64 = (1n << 64n) - 1n;
+
+/** hash() of a Python int (small ints): itself, except hash(-1) == -2. */
+const pyHash = (k: number) => (k === -1 ? -2 : k);
+
+/**
+ * Emulates CPython 3.11's set of ints (open addressing, linear probes + perturbation), so that
+ * iteration order, pop() and intersection() behave exactly like oemer running on CPython.
+ */
+export class PySet {
+  private table: Slot[] = new Array<Slot>(8).fill(null);
+  private fill = 0;
+  private used = 0;
+  private finger = 0;
+
+  constructor(items?: Iterable<number>) {
+    if (items) for (const k of items) this.add(k);
+  }
+
+  get size(): number {
+    return this.used;
+  }
+
+  private static probe(table: Slot[], h: number, visit: (i: number) => boolean): void {
+    const mask = table.length - 1;
+    let perturb = BigInt(h) & MASK64;
+    let i = Number(BigInt(h) & BigInt(mask));
+    for (;;) {
+      let probes = i + 9 <= mask ? 9 : 0;
+      let j = i;
+      do {
+        if (visit(j)) return;
+        j++;
+      } while (probes-- > 0);
+      perturb >>= 5n;
+      i = Number((BigInt(i) * 5n + 1n + perturb) & BigInt(mask));
+    }
+  }
+
+  has(k: number): boolean {
+    let found = false;
+    PySet.probe(this.table, pyHash(k), (j) => {
+      const e = this.table[j];
+      if (e === null) return true;
+      if (e === k) {
+        found = true;
+        return true;
+      }
+      return false;
+    });
+    return found;
+  }
+
+  add(k: number): void {
+    let freeslot = -1;
+    let target = -1;
+    let exists = false;
+    PySet.probe(this.table, pyHash(k), (j) => {
+      const e = this.table[j];
+      if (e === null) {
+        target = j;
+        return true;
+      }
+      if (e === k) {
+        exists = true;
+        return true;
+      }
+      if (e === DUMMY && freeslot < 0) freeslot = j;
+      return false;
+    });
+    if (exists) return;
+    if (freeslot >= 0) {
+      this.table[freeslot] = k;
+      this.used++;
+      return;
+    }
+    this.table[target] = k;
+    this.fill++;
+    this.used++;
+    const mask = this.table.length - 1;
+    if (this.fill * 5 >= mask * 3) this.resize(this.used > 50000 ? this.used * 2 : this.used * 4);
+  }
+
+  private resize(minused: number): void {
+    let newsize = 8;
+    while (newsize <= minused) newsize <<= 1;
+    const old = this.table;
+    this.table = new Array<Slot>(newsize).fill(null);
+    for (const e of old) {
+      if (e === null || e === DUMMY) continue;
+      let placed = -1;
+      PySet.probe(this.table, pyHash(e), (j) => {
+        if (this.table[j] === null) {
+          placed = j;
+          return true;
+        }
+        return false;
+      });
+      this.table[placed] = e;
+    }
+    this.fill = this.used;
+  }
+
+  discard(k: number): void {
+    PySet.probe(this.table, pyHash(k), (j) => {
+      const e = this.table[j];
+      if (e === null) return true;
+      if (e === k) {
+        this.table[j] = DUMMY;
+        this.used--;
+        return true;
+      }
+      return false;
+    });
+  }
+
+  pop(): number {
+    if (this.used === 0) throw new Error('pop from an empty set');
+    const n = this.table.length;
+    let i = this.finger & (n - 1);
+    while (this.table[i] === null || this.table[i] === DUMMY) i = (i + 1) % n;
+    const k = this.table[i] as number;
+    this.table[i] = DUMMY;
+    this.used--;
+    this.finger = i + 1;
+    return k;
+  }
+
+  *[Symbol.iterator](): IterableIterator<number> {
+    for (const e of this.table) if (e !== null && e !== DUMMY) yield e;
+  }
+
+  values(): number[] {
+    return [...this];
+  }
+
+  /** set.intersection(other): iterates the smaller set (the argument when sizes are equal). */
+  intersection(other: PySet): PySet {
+    let big: PySet = this;
+    let small: PySet = other;
+    if (other.size > this.size) [big, small] = [other, this];
+    const out = new PySet();
+    for (const k of small) if (big.has(k)) out.add(k);
+    return out;
+  }
+}
+
 // ------------------------------------------------------------------ heapq
 
 type Cmp<T> = (a: T, b: T) => boolean; // a < b

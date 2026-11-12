@@ -118,6 +118,75 @@ for i in range(40):
     pops.append({'vals': vals, 'pop': int(s2.pop()) if s2 else None})
 out['set_pop'] = pops
 
+# CPython set behaviour: build from sorted ints, discard, pop, iterate, intersection with dict-ordered keys
+setops = []
+for i in range(60):
+    k = int(rng.integers(1, 80))
+    hi = int(rng.choice([16, 60, 300, 5000]))
+    vals = sorted(set(int(v) for v in rng.integers(-1, hi, k)))
+    s1 = set(np.unique(np.array(vals)))
+    removed = [int(v) for v in rng.choice(vals, size=min(len(vals), int(rng.integers(0, 4))), replace=False)]
+    for r in removed:
+        s1.discard(r)
+    order = [int(v) for v in s1]
+    keys = [int(v) for v in rng.integers(0, hi, int(rng.integers(1, 40)))]
+    d = {}
+    for kk in keys:
+        d[kk] = True
+    inter = s1.intersection(set(d.keys()))
+    inter_order = [int(v) for v in inter]
+    pops = []
+    s2 = set(s1)
+    while len(pops) < 3 and s1:
+        pops.append(int(s1.pop()))
+    setops.append({'vals': vals, 'removed': removed, 'order': order, 'keys': list(d.keys()), 'inter': inter_order, 'pops': pops})
+out['set_ops'] = setops
+
+# PIL bicubic resize (as oemer.inference.predict does) and SVM predictions with oemer's models
+import os, pickle, warnings
+import oemer
+from PIL import Image
+warnings.filterwarnings('ignore')
+svm = {n: pickle.load(open(os.path.join(oemer.MODULE_PATH, 'sklearn_models', f'{n}.model'), 'rb')) for n in ['clef', 'sfn', 'rests', 'rests_above8']}
+resize_cases = []
+predict_cases = []
+for i in range(24):
+    h, w = int(rng.integers(8, 120)), int(rng.integers(6, 90))
+    region = blobs(h, w, int(rng.integers(2, 12)), max_r=max(3, min(h, w) // 3))
+    if i % 4 == 0:
+        region = region * 255
+    r = region.copy()
+    if np.max(r) == 1:
+        r = r * 255
+    img = Image.fromarray(r.astype(np.uint8)).resize((40, 70))
+    arr = np.array(img)
+    resize_cases.append({'img': enc(np.where(region > 0, 1, 0).astype(np.uint8)), 'scale255': bool(i % 4 != 0), 'out': arr.flatten().tolist()})
+    preds = {}
+    for n, info in svm.items():
+        preds[n] = info['class_map'][info['model'].predict(arr.reshape(1, -1))[0]]
+    predict_cases.append({'img': enc(np.where(region > 0, 1, 0).astype(np.uint8)), 'pred': preds})
+# a few upscaling cases too
+for i in range(6):
+    h, w = int(rng.integers(3, 20)), int(rng.integers(3, 20))
+    region = blobs(h, w, 3, max_r=3) * 255
+    arr = np.array(Image.fromarray(region.astype(np.uint8)).resize((40, 70)))
+    resize_cases.append({'img': enc(np.where(region > 0, 1, 0).astype(np.uint8)), 'scale255': True, 'out': arr.flatten().tolist()})
+out['pil_resize'] = resize_cases
+out['svm_predict'] = predict_cases
+
+# cv2.line on a float canvas (8-connected), as oemer's draw_lines in filter_barlines
+lines8 = []
+for i in range(10):
+    h, w = int(rng.integers(20, 60)), int(rng.integers(20, 60))
+    d = np.zeros((h, w, 3))
+    segs = []
+    for _ in range(int(rng.integers(1, 5))):
+        x1, y1, x2, y2 = [int(v) for v in (rng.integers(-5, w + 5), rng.integers(-5, h + 5), rng.integers(-5, w + 5), rng.integers(-5, h + 5))]
+        segs.append([x1, y1, x2, y2])
+        cv2.line(d, (x1, y1), (x2, y2), (0, 255, 0), 1, cv2.LINE_AA)
+    lines8.append({'w': w, 'h': h, 'segs': segs, 'out': enc((d[..., 1] > 0).astype(np.uint8))})
+out['line8'] = lines8
+
 # numpy float sums (pairwise)
 sums = []
 for n in [3, 8, 9, 17, 100, 129, 300, 1000]:
