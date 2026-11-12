@@ -1,7 +1,7 @@
 // Port of oemer/utils.py and oemer/bbox.py helpers (oemer 0.1.8, MIT).
 
 import { findContourBoxes, type BBox, type Raster } from './cv';
-import { wardClusterLabels } from './pyport';
+import { PySet, wardClusterLabels } from './pyport';
 import type { Staff } from './staffline';
 
 export const getBbox = (data: Raster): BBox[] => findContourBoxes(data);
@@ -95,7 +95,8 @@ export function rmMergeOverlapBbox(boxes: BBox[], mode: 'remove' | 'merge' = 're
       return;
     }
     let valid = true;
-    for (const val of [...counts.keys()].sort((a, c) => a - c)) {
+    // iterate like `set(np.unique(region)) - {0}` in CPython
+    for (const val of new PySet([...counts.keys()].sort((a, c) => a - c)).values()) {
       const tar = records.get(val)!;
       const ratio = counts.get(val)! / info.area;
       if (ratio > overlapRatio) {
@@ -113,4 +114,28 @@ export function rmMergeOverlapBbox(boxes: BBox[], mode: 'remove' | 'merge' = 're
     }
   });
   return [...records.values()].map((r) => r.bbox);
+}
+
+/** general_filtering_rules.filter_out_of_range_bbox: keep boxes whose centre x lies within the zones. */
+export function filterOutOfRangeBbox<T extends BBox>(boxes: T[], minX: number, maxX: number): T[] {
+  return boxes.filter((b) => {
+    const cx = pyRoundLocal((b[0] + b[2]) / 2);
+    return !(cx > maxX || cx < minX);
+  });
+}
+
+/** general_filtering_rules.filter_out_small_area with an area function of the local unit size. */
+export function filterOutSmallArea(boxes: BBox[], flat: Staff[], areaOf: (unit: number) => number): BBox[] {
+  return boxes.filter((b) => {
+    const [cx, cy] = [pyRoundLocal((b[0] + b[2]) / 2), pyRoundLocal((b[1] + b[3]) / 2)];
+    return (b[2] - b[0]) * (b[3] - b[1]) > areaOf(getUnitSize(flat, cx, cy));
+  });
+}
+
+function pyRoundLocal(v: number): number {
+  const f = Math.floor(v);
+  const d = v - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
 }

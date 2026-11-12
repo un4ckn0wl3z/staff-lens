@@ -210,6 +210,7 @@ export function label4(src: Raster): { labels: Int32Array; count: number } {
 
 interface ContourNode {
   box: BBox;
+  points: [number, number][];
   hole: boolean;
   children: ContourNode[];
   parent: ContourNode | null;
@@ -224,11 +225,23 @@ const DY = [0, 1, 1, 1, 0, -1, -1, -1];
  * returns them. Suzuki–Abe border following; boxes are [x1, y1, x2, y2] with exclusive x2/y2.
  */
 export function findContourBoxes(src: Raster): BBox[] {
+  return findContours(src).map((c) => c.box);
+}
+
+export interface Contour {
+  box: BBox;
+  /** Border pixels as [x, y] (all traced pixels, not chain-compressed). */
+  points: [number, number][];
+  hole: boolean;
+}
+
+/** cv2.findContours(RETR_TREE) in OpenCV's order, with each contour's border pixels. */
+export function findContours(src: Raster): Contour[] {
   const W = src.width + 2;
   const H = src.height + 2;
   const f = new Int32Array(W * H);
   for (let y = 0; y < src.height; y++) for (let x = 0; x < src.width; x++) if (src.data[y * src.width + x]) f[(y + 1) * W + x + 1] = 1;
-  const root: ContourNode = { box: [0, 0, 0, 0], hole: true, children: [], parent: null };
+  const root: ContourNode = { box: [0, 0, 0, 0], points: [], hole: true, children: [], parent: null };
   const nodes = new Map<number, ContourNode>([[1, root]]);
   let nbd = 1;
   const dirOf = (fromX: number, fromY: number, cx: number, cy: number) => {
@@ -264,6 +277,7 @@ export function findContourBoxes(src: Raster): BBox[] {
         let maxX = j;
         let minY = i;
         let maxY = i;
+        const pts: [number, number][] = [[j - 1, i - 1]];
         // 3.1 clockwise search around (i, j) from (i2, j2) for a non-zero pixel
         let d0 = dirOf(j2, i2, j, i);
         let found = -1;
@@ -303,6 +317,7 @@ export function findContourBoxes(src: Raster): BBox[] {
             const q = i3 * W + j3;
             if (eastZeroExamined) f[q] = -nbd;
             else if (f[q] === 1) f[q] = nbd;
+            if (i3 !== i || j3 !== j) pts.push([j3 - 1, i3 - 1]);
             if (j3 < minX) minX = j3;
             if (j3 > maxX) maxX = j3;
             if (i3 < minY) minY = i3;
@@ -314,7 +329,7 @@ export function findContourBoxes(src: Raster): BBox[] {
             j3 = j4;
           }
         }
-        const node: ContourNode = { box: [minX - 1, minY - 1, maxX, maxY], hole, children: [], parent: parentNode };
+        const node: ContourNode = { box: [minX - 1, minY - 1, maxX, maxY], points: pts, hole, children: [], parent: parentNode };
         parentNode.children.unshift(node); // OpenCV prepends new contours to the parent's child list
         nodes.set(nbd, node);
       }
@@ -322,10 +337,10 @@ export function findContourBoxes(src: Raster): BBox[] {
       if (cur !== 1 && cur !== 0) lnbd = Math.abs(cur);
     }
   }
-  const out: BBox[] = [];
+  const out: Contour[] = [];
   const walk = (n: ContourNode) => {
     for (const c of n.children) {
-      out.push(c.box);
+      out.push({ box: c.box, points: c.points, hole: c.hole });
       walk(c);
     }
   };

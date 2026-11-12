@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { cpythonSetPop, npMean, npSum, PySet, wardClusterLabels } from '../src/omr/oemer/pyport';
 import { gunzipSync } from 'node:zlib';
 import { loadSvmBundle, pilResize, predictRegion } from '../src/omr/oemer/classifier';
-import { dilate, drawLine8, ellipseKernel, erode, findContourBoxes, findPeaks, houghLinesP, label4, olsSlope, rectKernel, type Raster } from '../src/omr/oemer/cv';
+import { contourArea, fillPoly, minAreaRect } from '../src/omr/oemer/rotated';
+import { dilate, drawLine8, ellipseKernel, findContours, erode, findContourBoxes, findPeaks, houghLinesP, label4, olsSlope, rectKernel, type Raster } from '../src/omr/oemer/cv';
 
 interface Enc {
   w: number;
@@ -120,6 +121,46 @@ describe('Pillow resize, SVM classifiers and line drawing', () => {
       const img = { width: c.w, height: c.h, data: new Uint8Array(c.w * c.h) };
       for (const s of c.segs) drawLine8(img, s[0], s[1], s[2], s[3]);
       expect(Array.from(img.data).join(''), JSON.stringify(c.segs)).toBe(c.out.data);
+    }
+  });
+});
+
+describe('rotated boxes and polygon fill (beams)', () => {
+  it('fillPoly and contourArea match OpenCV', () => {
+    for (const c of golden.fill_poly) {
+      const img = { width: c.w, height: c.h, data: new Uint8Array(c.w * c.h) };
+      fillPoly(img, c.pts);
+      expect(Array.from(img.data).join(''), JSON.stringify(c.pts)).toBe(c.out.data);
+      expect(contourArea(c.pts)).toBe(c.area);
+    }
+  });
+
+  it('minAreaRect corners (truncated like oemer) match OpenCV', () => {
+    let same = 0;
+    const key = (pts: number[][]) => pts.map((p) => p.join(',')).sort().join(' ');
+    for (const c of golden.min_area_rect) {
+      const r = minAreaRect(c.pts);
+      const neg = r.corners.some(([x, y]) => x < 0 || y < 0);
+      if (neg !== c.neg) continue;
+      if (neg) {
+        same++;
+        continue;
+      }
+      if (key(r.corners.map(([x, y]) => [Math.trunc(x), Math.trunc(y)])) === key(c.trunc)) same++;
+      expect(Math.min(...r.size)).toBeCloseTo(Math.min(...c.size), 3);
+    }
+    // float32 noise in OpenCV's calipers can move a truncated corner by one pixel
+    expect(same / golden.min_area_rect.length).toBeGreaterThan(0.9);
+  });
+
+  it('findContours points are the border pixels', () => {
+    for (const c of golden.contour_points) {
+      const mine = findContours(dec(c.img));
+      expect(mine.length).toBe(c.contours.length);
+      mine.forEach((m, k) => {
+        const set = new Set(m.points.map((p) => p.join(',')));
+        for (const p of c.contours[k]) expect(set.has(p.join(',')), `contour ${k}`).toBe(true);
+      });
     }
   });
 });

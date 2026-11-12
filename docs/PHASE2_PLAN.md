@@ -29,7 +29,7 @@ file (jpg/png/webp/pdf)
 | M1 | Image/PDF input; rotate, crop, auto-deskew, 4-corner perspective correction; scan view UI | — | done |
 | M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | |
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
-| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | in progress: staff lines ✓, noteheads ✓ |
+| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | in progress: staff lines, noteheads, note groups, symbols, rhythm ✓ — system building next |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
@@ -60,9 +60,16 @@ M1, M2 and M3 are independent of each other.
   (find_peaks ties in the distance filter follow numpy's unstable argsort and are excluded).
 - oemer on the clean Aura Lee page: 12/12 bars, key and clef right; errors: 2 extra notes in bar 1 (tempo mark),
   bar 2 misses the half note. The port aims to reproduce oemer exactly, then improve.
-- Ported and matching oemer exactly: staff-line extraction (`staffline.ts`), notehead extraction (`notehead.ts`).
-- Next: note groups, symbols (barlines, clefs, accidentals, rests — convert oemer's scikit-learn classifiers),
-  rhythm, system building → `SLScore`.
+- Ported and matching oemer exactly on the fixture: staff lines (`staffline.ts`), noteheads (`notehead.ts`),
+  note groups (`noteGroup.ts`), symbols — barlines, clefs, accidentals/keys, rests (`symbols.ts`), and rhythm —
+  dots, beams, flags, note values (`rhythm.ts`).
+- More golden-tested primitives: CPython set semantics (`PySet`), Pillow 13 bicubic resize (it runs the vertical pass
+  first only when shrinking vertically and that gives the smaller intermediate), libsvm one-vs-one prediction with
+  oemer's four SVMs (exported by `tools/export_oemer_svm.py` to `public/omr/`), 8-connected `cv2.line`, `fillPoly`,
+  `contourArea`, and `minAreaRect` (truncated corners agree with OpenCV in ≥90% of cases; OpenCV's float32 noise
+  moves the rest by one pixel).
+- Not covered by the fixture yet: rests and beamed notes (no rests or beams on the Aura Lee page) — add fixtures in M6.
+- Next: system building (oemer's build_system.py: measures, key/clef/time, pitches, voices) → `SLScore`.
 
 ## Notes and risks
 

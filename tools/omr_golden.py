@@ -187,6 +187,46 @@ for i in range(10):
     lines8.append({'w': w, 'h': h, 'segs': segs, 'out': enc((d[..., 1] > 0).astype(np.uint8))})
 out['line8'] = lines8
 
+# fillPoly on integer polygons (as oemer does with boxPoints cast to uint64)
+fills = []
+for i in range(20):
+    h, w = int(rng.integers(20, 60)), int(rng.integers(20, 60))
+    n = 4
+    cx, cy = rng.integers(5, w - 5), rng.integers(5, h - 5)
+    ang = rng.random() * np.pi
+    a, b = rng.integers(1, 15), rng.integers(1, 8)
+    pts = []
+    for k in range(4):
+        t = ang + k * np.pi / 2
+        r = a if k % 2 == 0 else b
+        pts.append([int(cx + r * np.cos(t)), int(cy + r * np.sin(t))])
+    if i % 3 == 0:
+        pts = [[int(rng.integers(0, w)), int(rng.integers(0, h))] for _ in range(4)]
+    img = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(img, [np.array(pts, np.uint64)], color=1)
+    fills.append({'w': w, 'h': h, 'pts': pts, 'out': enc(img), 'area': float(cv2.contourArea(np.array(pts, np.uint64).astype(np.int32)))})
+out['fill_poly'] = fills
+
+# minAreaRect + boxPoints on contours of random blobs
+rects = []
+for i in range(25):
+    img = blobs(int(rng.integers(20, 70)), int(rng.integers(20, 70)), int(rng.integers(1, 6)), max_r=10)
+    cs, _ = cv2.findContours(img.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    for c in cs[:3]:
+        rb = cv2.minAreaRect(c)
+        bp = cv2.boxPoints(rb)
+        rects.append({'pts': c.reshape(-1, 2).tolist(), 'size': [float(rb[1][0]), float(rb[1][1])], 'center': [float(rb[0][0]), float(rb[0][1])],
+                      'box': bp.tolist(), 'neg': bool(any(cc < 0 for cc in bp.reshape(-1))), 'trunc': bp.astype(np.uint64).astype(np.int64).tolist() if not any(cc < 0 for cc in bp.reshape(-1)) else None})
+out['min_area_rect'] = rects
+
+# contour points in OpenCV order (CHAIN_APPROX_SIMPLE)
+cpts = []
+for i in range(10):
+    img = blobs(int(rng.integers(15, 50)), int(rng.integers(15, 50)), int(rng.integers(2, 8)))
+    cs, _ = cv2.findContours(img.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    cpts.append({'img': enc(img), 'contours': [c.reshape(-1, 2).tolist() for c in cs]})
+out['contour_points'] = cpts
+
 # numpy float sums (pairwise)
 sums = []
 for n in [3, 8, 9, 17, 100, 129, 300, 1000]:
