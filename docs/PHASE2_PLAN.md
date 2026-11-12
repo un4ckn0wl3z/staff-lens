@@ -29,7 +29,7 @@ file (jpg/png/webp/pdf)
 | M1 | Image/PDF input; rotate, crop, auto-deskew, 4-corner perspective correction; scan view UI | — | done |
 | M2 | Score from model: build an alphaTab score directly from `SLScore` (no source file); note editor (pitch ↑↓, duration, accidental, rest, insert/delete, chord symbols, undo); confidence highlighting | — | |
 | M3 | Models: fetch `1st_model.onnx` (71 MB) and `2nd_model.onnx` (38 MB) from the oemer `checkpoints` release in CI and in `npm run fetch-models` (pinned SHA-256, not stored in git); onnxruntime-web worker with sliding-window inference (window 256, step 128) and progress; cache for offline | — | done |
-| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | in progress: staff lines, noteheads, note groups, symbols, rhythm ✓ — system building next |
+| M4 | Port post-processing: staff lines, noteheads, note groups, symbols (clef/accidental/rest classifiers converted from oemer's scikit-learn models), rhythm, system building → `SLScore` | M3 | done |
 | M5 | Chord-symbol OCR with Tesseract.js, parsed with `parseChordSymbol`; low-confidence marking | M2, M4 | |
 | M6 | Fixtures and tests: rendered Aura Lee page and a phone-photo fixture; per-stage unit tests; end-to-end note accuracy check | M4 | |
 
@@ -69,7 +69,12 @@ M1, M2 and M3 are independent of each other.
   `contourArea`, and `minAreaRect` (truncated corners agree with OpenCV in ≥90% of cases; OpenCV's float32 noise
   moves the rest by one pixel).
 - Not covered by the fixture yet: rests and beamed notes (no rests or beams on the Aura Lee page) — add fixtures in M6.
-- Next: system building (oemer's build_system.py: measures, key/clef/time, pitches, voices) → `SLScore`.
+- System building (`builder.ts`) writes MusicXML byte-identical to oemer's for the fixture; StaffLens opens it with
+  its normal MusicXML import, so recognised scores get rendering, playback, explanations and staff → tab.
+- `pipeline.ts` runs the whole post-processing inside the inference worker (~6 s for a 3.7 MP page after the
+  morphology was made linear-time with a per-row run decomposition + van Herk/Gil-Werman windows).
+- Browser check (fast quality, WebGPU): Aura Lee page → 37 notes in 12 bars in 140 s, same result as oemer;
+  "Open in StaffLens" loads it.
 
 ## Notes and risks
 

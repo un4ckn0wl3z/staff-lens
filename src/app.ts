@@ -67,7 +67,14 @@ export class App {
     this.scan = new ScanView(
       (m, e) => this.toast(m, e),
       (scan, seg) => {
-        this.omr = { scan, seg }; // input for the note-building step (M4)
+        this.omr = { scan, seg };
+      },
+      (xml, name) => {
+        this.setLoading(true);
+        this.loadBytes(new TextEncoder().encode(xml), name)
+          .then(() => this.toast(t('omr.opened')))
+          .catch((e) => this.toast(t('open.error', { msg: (e as Error).message }), true))
+          .finally(() => this.setLoading(false));
       },
     );
     this.fretboard = new Fretboard($('#fretboard'), (pos, midi) => this.onFretPick(pos, midi));

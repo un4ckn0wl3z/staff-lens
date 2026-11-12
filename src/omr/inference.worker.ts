@@ -2,6 +2,7 @@
 // Runs oemer's two segmentation models over a page with onnxruntime-web (WebGPU if available, else WASM).
 
 import { oemerTargetSize, resize, type Img } from './geometry';
+import { fetchSvmBundle, runPostprocess } from './oemer/pipeline';
 import { fillWindowBGR, OEMER_MODELS, ScoreAccumulator, stepFor, tiles, type Quality } from './tiling';
 
 export interface InferenceRequest {
@@ -11,12 +12,17 @@ export interface InferenceRequest {
   modelBase: string;
   quality: Quality;
   allowGpu: boolean;
+  /** URL prefix of the app (for the classifier files), e.g. "/staff-lens/". */
+  appBase: string;
+  /** Title written into the recognised MusicXML. */
+  title: string;
 }
 
 export type Provider = 'webgpu' | 'wasm';
 
 export type InferenceMessage =
   | { type: 'progress'; stage: 'download' | 'load' | 'infer'; model: number; done: number; total: number; provider?: Provider; threads?: number }
+  | { type: 'progress'; stage: 'notes'; step: string; model: number; done: number; total: number }
   | {
       type: 'done';
       image: Img;
@@ -25,6 +31,11 @@ export type InferenceMessage =
       provider: Provider;
       threads: number;
       ms: number;
+      /** Recognised score (oemer post-processing), or null if it failed. */
+      musicxml: string | null;
+      notes: number;
+      bars: number;
+      error: string | null;
     }
   | { type: 'error'; message: string };
 
@@ -112,7 +123,23 @@ async function run(req: InferenceRequest): Promise<void> {
     await session.release();
     maps.push(acc.argmax());
   }
-  post({ type: 'done', image, maps, provider, threads, ms: performance.now() - t0 }, [image.data.buffer, ...maps.map((x) => x.buffer)]);
+  // notes, rests, clefs… from the layers (port of oemer's post-processing)
+  let musicxml: string | null = null;
+  let notes = 0;
+  let bars = 0;
+  let error: string | null = null;
+  try {
+    const steps = ['staffs', 'noteheads', 'groups', 'symbols', 'rhythm', 'build'];
+    post({ type: 'progress', stage: 'notes', step: 'classifiers', model: 1, done: 0, total: steps.length });
+    const svm = await fetchSvmBundle(req.appBase);
+    const res = runPostprocess(image.width, image.height, maps, svm, req.title, (step) =>
+      post({ type: 'progress', stage: 'notes', step, model: 1, done: steps.indexOf(step), total: steps.length }),
+    );
+    ({ musicxml, notes, bars } = res);
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  post({ type: 'done', image, maps, provider, threads, ms: performance.now() - t0, musicxml, notes, bars, error }, [image.data.buffer, ...maps.map((x) => x.buffer)]);
 }
 
 self.onmessage = (e: MessageEvent<InferenceRequest>) => {

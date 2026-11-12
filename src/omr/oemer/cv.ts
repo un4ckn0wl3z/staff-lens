@@ -136,7 +136,8 @@ export function ellipseKernel(width: number, height: number): Kernel {
   return { rows: height, cols: width, data };
 }
 
-function morph(src: Raster, k: Kernel, isErode: boolean): Raster {
+/** Reference implementation (any kernel shape). */
+function morphGeneric(src: Raster, k: Kernel, isErode: boolean): Raster {
   const { width: w, height: h, data: s } = src;
   const out = new Uint8Array(w * h);
   const ax = Math.floor(k.cols / 2);
@@ -154,6 +155,78 @@ function morph(src: Raster, k: Kernel, isErode: boolean): Raster {
         if (isErode ? p < v : p > v) v = p;
       }
       out[y * w + x] = v;
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
+/** Sliding min/max over [x + dx0, x + dx1] for every row (van Herk / Gil-Werman), outside pixels ignored. */
+function rowWindow(src: Raster, dx0: number, dx1: number, isErode: boolean): Uint8Array {
+  const { width: w, height: h, data } = src;
+  const L = dx1 - dx0 + 1;
+  const neutral = isErode ? 255 : 0;
+  const n = w + L - 1;
+  const P = new Uint8Array(n);
+  const g = new Uint8Array(n);
+  const hh = new Uint8Array(n);
+  const out = new Uint8Array(w * h);
+  const better = isErode ? (a: number, b: number) => (a < b ? a : b) : (a: number, b: number) => (a > b ? a : b);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let i = 0; i < n; i++) {
+      const x = i + dx0;
+      P[i] = x >= 0 && x < w ? data[row + x] : neutral;
+    }
+    for (let i = 0; i < n; i++) g[i] = i % L === 0 ? P[i] : better(g[i - 1], P[i]);
+    for (let i = n - 1; i >= 0; i--) hh[i] = (i + 1) % L === 0 || i === n - 1 ? P[i] : better(hh[i + 1], P[i]);
+    for (let x = 0; x < w; x++) out[row + x] = better(hh[x], g[x + L - 1]);
+  }
+  return out;
+}
+
+function morph(src: Raster, k: Kernel, isErode: boolean): Raster {
+  const { width: w, height: h } = src;
+  const ax = Math.floor(k.cols / 2);
+  const ay = Math.floor(k.rows / 2);
+  // each kernel row must be one contiguous run (true for rectangles and OpenCV ellipses)
+  const runs: { dy: number; dx0: number; dx1: number }[] = [];
+  for (let ky = 0; ky < k.rows; ky++) {
+    let a = -1;
+    let b = -1;
+    for (let kx = 0; kx < k.cols; kx++)
+      if (k.data[ky * k.cols + kx]) {
+        if (a < 0) a = kx;
+        else if (b !== kx - 1) return morphGeneric(src, k, isErode);
+        b = kx;
+      }
+    if (a >= 0) runs.push({ dy: ky - ay, dx0: a - ax, dx1: b - ax });
+  }
+  const neutral = isErode ? 255 : 0;
+  if (runs.length === 0) return { width: w, height: h, data: new Uint8Array(w * h).fill(neutral) };
+  const cache = new Map<string, Uint8Array>();
+  const rowsH = runs.map((r) => {
+    const key = `${r.dx0},${r.dx1}`;
+    if (!cache.has(key)) cache.set(key, rowWindow(src, r.dx0, r.dx1, isErode));
+    return { dy: r.dy, data: cache.get(key)! };
+  });
+  const out = new Uint8Array(w * h).fill(neutral);
+  for (const r of rowsH) {
+    for (let y = 0; y < h; y++) {
+      const yy = y + r.dy;
+      if (yy < 0 || yy >= h) continue;
+      const o = y * w;
+      const s = yy * w;
+      if (isErode) {
+        for (let x = 0; x < w; x++) {
+          const v = r.data[s + x];
+          if (v < out[o + x]) out[o + x] = v;
+        }
+      } else {
+        for (let x = 0; x < w; x++) {
+          const v = r.data[s + x];
+          if (v > out[o + x]) out[o + x] = v;
+        }
+      }
     }
   }
   return { width: w, height: h, data: out };

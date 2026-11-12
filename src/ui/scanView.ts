@@ -42,6 +42,7 @@ export class ScanView {
   constructor(
     private toast: (msg: string, error?: boolean) => void,
     private onSegmented: ((r: ScanResult, seg: Segmentation) => void) | null = null,
+    private onOpen: ((musicxml: string, fileName: string) => void) | null = null,
   ) {
     this.root = document.createElement('div');
     this.root.className = 'scan-view';
@@ -205,6 +206,14 @@ export class ScanView {
         this.showSeg = false;
         this.draw();
         break;
+      case 'open':
+        if (this.seg?.musicxml && this.onOpen) {
+          const name = this.fileName.replace(/\.[^.]+$/, '') + (this.pdf ? `-p${this.page + 1}` : '') + '.musicxml';
+          const xml = this.seg.musicxml;
+          this.close();
+          this.onOpen(xml, name);
+        }
+        break;
       case 'show-seg':
         this.showSeg = true;
         this.drawSeg();
@@ -255,6 +264,7 @@ export class ScanView {
         ${layerBoxes}
         <button class="btn small" data-scan="back">${esc(t('omr.back'))}</button>
         <button class="btn small" data-scan="show-seg">${esc(t('omr.showSeg'))}</button>
+        <button class="btn primary" data-scan="open" hidden>${esc(t('omr.open'))}</button>
       </div>
       <div class="scan-stage"><div class="scan-frame"><canvas></canvas><svg class="scan-overlay"></svg></div></div>
       <p class="muted small scan-status" aria-live="polite"></p>`;
@@ -285,12 +295,22 @@ export class ScanView {
     this.root.classList.add('running');
     this.inferStart = 0;
     try {
-      const seg = await this.runner.run(image, this.quality, (p) => this.onProgress(p, bar, label));
+      const title = this.fileName.replace(/\.[^.]+$/, '') + (this.pdf ? ` (${this.page + 1})` : '');
+      const seg = await this.runner.run(image, this.quality, (p) => this.onProgress(p, bar, label), title);
       this.seg = seg;
       this.showSeg = true;
       this.drawSeg();
       const secs = Math.round(seg.ms / 1000);
-      this.status(t('omr.done', { s: secs, provider: seg.provider === 'webgpu' ? 'WebGPU' : `WASM × ${seg.threads}` }) + ' ' + t('omr.next'));
+      const how = seg.provider === 'webgpu' ? 'WebGPU' : `WASM × ${seg.threads}`;
+      const openBtn = this.root.querySelector<HTMLButtonElement>('[data-scan="open"]')!;
+      if (seg.musicxml && seg.notes > 0) {
+        this.status(t('omr.found', { notes: seg.notes, bars: seg.bars, s: secs, provider: how }));
+        openBtn.hidden = false;
+        openBtn.focus();
+      } else {
+        this.status(seg.error ? t('omr.buildError', { msg: seg.error }) : t('omr.noNotes'));
+        openBtn.hidden = true;
+      }
       this.onSegmented?.({ image, fileName: this.fileName, page: this.page }, seg);
     } catch (e) {
       const msg = (e as Error).message;
@@ -304,9 +324,12 @@ export class ScanView {
 
   private onProgress(p: ProgressInfo, bar: HTMLProgressElement, label: HTMLElement): void {
     const model = p.model + 1;
-    // overall: each model = 15% download/load + 85% inference
-    const share = (frac: number) => (p.model + frac) / 2;
-    if (p.stage === 'download') {
+    // overall: each model = 15% download/load + 85% inference; reading the notes is the last 5%
+    const share = (frac: number) => ((p.model + frac) / 2) * 0.95;
+    if (p.stage === 'notes') {
+      bar.value = 0.95 + (0.05 * p.done) / Math.max(1, p.total);
+      label.textContent = t('omr.building', { step: t(`omr.step.${p.step}` as StringKey) });
+    } else if (p.stage === 'download') {
       bar.value = share(p.total ? (0.15 * p.done) / p.total : 0);
       label.textContent = t('omr.download', { model, mb: (p.done / 1e6).toFixed(0), total: p.total ? (p.total / 1e6).toFixed(0) : '?' });
     } else if (p.stage === 'load') {

@@ -10,6 +10,10 @@ export interface Segmentation {
   provider: Provider;
   threads: number;
   ms: number;
+  musicxml: string | null;
+  notes: number;
+  bars: number;
+  error: string | null;
 }
 
 export type ProgressInfo = Extract<InferenceMessage, { type: 'progress' }>;
@@ -22,7 +26,7 @@ export class OmrRunner {
     return this.worker !== null;
   }
 
-  run(image: Img, quality: Quality, onProgress: (p: ProgressInfo) => void, allowGpu = true): Promise<Segmentation> {
+  run(image: Img, quality: Quality, onProgress: (p: ProgressInfo) => void, title = 'Scan', allowGpu = true): Promise<Segmentation> {
     this.cancel();
     const worker = new Worker(new URL('./inference.worker.ts', import.meta.url), { type: 'module' });
     this.worker = worker;
@@ -33,7 +37,7 @@ export class OmrRunner {
         if (m.type === 'progress') onProgress(m);
         else if (m.type === 'done') {
           this.finish();
-          resolve({ image: m.image, maps: m.maps, provider: m.provider, threads: m.threads, ms: m.ms });
+          resolve({ image: m.image, maps: m.maps, provider: m.provider, threads: m.threads, ms: m.ms, musicxml: m.musicxml, notes: m.notes, bars: m.bars, error: m.error });
         } else if (m.type === 'error') {
           this.finish();
           reject(new Error(m.message));
@@ -47,9 +51,12 @@ export class OmrRunner {
       const req: InferenceRequest = {
         type: 'run',
         image: { width: image.width, height: image.height, data: copy },
-        modelBase: `${import.meta.env.BASE_URL}models/`,
+        // absolute: relative URLs inside a worker resolve against the worker script, not the page
+        modelBase: new URL(`${import.meta.env.BASE_URL}models/`, location.href).href,
         quality,
         allowGpu,
+        appBase: new URL(import.meta.env.BASE_URL, location.href).href,
+        title,
       };
       worker.postMessage(req, [copy.buffer]);
     });
