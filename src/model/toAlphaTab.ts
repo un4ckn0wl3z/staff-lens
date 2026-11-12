@@ -49,7 +49,10 @@ export function buildRenderScore(
   staff.showTablature = true;
   staff.showStandardNotation = true;
   staff.transpositionPitch = 0;
-  staff.displayTranspositionPitch = -12; // guitar: written an octave above sounding
+  // guitar is written an octave above sounding: either the clef says so (treble 8vb, as in many guitar files) or the
+  // staff is shifted for display; never both, or the notes are drawn two octaves up
+  const clef8vb = staff.bars.some((b) => b.clefOttava === alphaTab.model.Ottavia._8vb);
+  staff.displayTranspositionPitch = clef8vb ? 0 : -12;
   track.playbackInfo.program = opts.program;
 
   for (const sl of part.notes) {

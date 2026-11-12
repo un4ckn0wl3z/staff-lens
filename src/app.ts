@@ -9,6 +9,7 @@ import { getLang, onLangChange, setLang, t, translateDom } from './i18n';
 import { arrange, DEFAULT_TAB_SETTINGS, type Arrangement, type TabSettings } from './model/arrangement';
 import { fromAlphaTab } from './model/fromAlphaTab';
 import { readMxlScoreXml } from './model/mxl';
+import { fixMusicXml } from './model/musicxmlFixups';
 import { parseMusicXmlHarmony } from './model/musicxmlHarmony';
 import type { SLNote, SLScore } from './model/score';
 import { buildRenderScore, idForRenderedNote, type RenderScore } from './model/toAlphaTab';
@@ -254,10 +255,13 @@ export class App {
   private async loadBytes(bytes: Uint8Array, fileName: string): Promise<void> {
     const ext = fileName.toLowerCase().split('.').pop() ?? '';
     const kind: SLScore['source']['kind'] = ext === 'mxl' ? 'mxl' : ext === 'xml' || ext === 'musicxml' ? 'musicxml' : ['gp', 'gpx', 'gp5', 'gp4', 'gp3'].includes(ext) ? 'guitarpro' : 'other';
-    const at = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes, this.api.settings);
     let xmlText: string | null = null;
     if (kind === 'musicxml') xmlText = new TextDecoder().decode(bytes);
     else if (kind === 'mxl') xmlText = await readMxlScoreXml(bytes);
+    // repaired MusicXML goes to alphaTab as plain XML (also for .mxl, whose root score was read above)
+    const fixed = xmlText !== null ? fixMusicXml(xmlText) : null;
+    const source = fixed !== null && fixed !== xmlText ? new TextEncoder().encode(fixed) : bytes;
+    const at = alphaTab.importer.ScoreLoader.loadScoreFromBytes(source, this.api.settings);
     const harmony = xmlText ? parseMusicXmlHarmony(xmlText) : null;
     const model = fromAlphaTab(at, { kind, fileName }, harmony);
     if (model.parts.length === 0) throw new Error('no pitched notes found');
