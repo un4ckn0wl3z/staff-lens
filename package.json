@@ -1,0 +1,26 @@
+{
+  "name": "staff-lens",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StaffLens — read, explain, play and convert standard notation to guitar tab, entirely in the browser.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@coderline/alphatab": "^1.9.0"
+  },
+  "devDependencies": {
+    "@coderline/alphatab-vite": "^1.9.0",
+    "happy-dom": "^21.0.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

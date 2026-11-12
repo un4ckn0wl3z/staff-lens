@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="StaffLens explains standard notation, plays it and converts it to guitar tab — entirely in your browser." />
+    <meta name="theme-color" content="#1f6f5c" />
+    <title>StaffLens</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      try {
+        var th = localStorage.getItem('stafflens.theme');
+        if (th === 'dark' || th === 'light') document.documentElement.dataset.theme = th;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="14" cy="14" r="10" fill="none" stroke="currentColor" stroke-width="2.5" />
+          <path d="M21.5 21.5 29 29" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+          <path d="M8 11h12M8 14h12M8 17h12" stroke="currentColor" stroke-width="1.2" />
+          <ellipse cx="12" cy="17" rx="2.4" ry="1.7" fill="currentColor" transform="rotate(-20 12 17)" />
+        </svg>
+        <div>
+          <h1>StaffLens</h1>
+          <p class="tagline" data-i18n="app.tagline">Read, hear and play standard notation on guitar</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <label class="btn primary file-btn">
+          <input id="file-input" type="file" accept=".musicxml,.xml,.mxl,.gp,.gpx,.gp5,.gp4,.gp3" />
+          <span data-i18n="open.file">Open file</span>
+        </label>
+        <button class="btn" data-demo="aura-lee" data-i18n="open.demo">Demo: Aura Lee</button>
+        <button class="btn" data-demo="chord-study" data-i18n="open.demo2">Demo: Chord study</button>
+        <button class="btn" disabled data-i18n="open.image">Image / PDF (coming soon)</button>
+        <button class="btn ghost" id="lang-btn" lang="th">ภาษาไทย</button>
+        <button class="btn ghost icon" id="theme-btn" data-i18n-title="theme.toggle" data-i18n-aria="theme.toggle">◐</button>
+      </div>
+    </header>
+
+    <div class="toolbar" role="toolbar" aria-label="Playback">
+      <div class="group">
+        <button class="btn icon play" id="btn-play" data-i18n-title="play.play" data-i18n-aria="play.play">▶</button>
+        <button class="btn icon" id="btn-stop" data-i18n-title="play.stop" data-i18n-aria="play.stop">■</button>
+        <button class="btn icon" id="btn-from" data-i18n-title="play.fromSelection" data-i18n-aria="play.fromSelection">⏵|</button>
+        <span id="sound-status" class="muted small" aria-live="polite"></span>
+      </div>
+      <div class="group">
+        <label class="inline-field" for="tempo"><span data-i18n="play.tempo">Tempo</span></label>
+        <input id="tempo" type="range" min="50" max="150" step="5" value="100" />
+        <output id="tempo-value">100%</output>
+      </div>
+      <div class="group">
+        <label class="check"><input id="metronome" type="checkbox" /> <span data-i18n="play.metronome">Metronome</span></label>
+        <label class="check"><input id="countin" type="checkbox" /> <span data-i18n="play.countIn">Count-in</span></label>
+      </div>
+      <div class="group">
+        <label class="check"><input id="loop-on" type="checkbox" /> <span data-i18n="play.loop">Loop bars</span></label>
+        <input id="loop-from" class="num" type="number" min="1" value="1" aria-label="from" />
+        <span data-i18n="play.to">to</span>
+        <input id="loop-to" class="num" type="number" min="1" value="4" aria-label="to" />
+      </div>
+      <div class="group">
+        <label class="check"><input id="accomp" type="checkbox" checked /> <span data-i18n="play.accompaniment">Chord accompaniment</span></label>
+        <select id="mix" data-i18n-aria="play.mix">
+          <option value="both" data-i18n="mix.both">Melody + chords</option>
+          <option value="melody" data-i18n="mix.melody">Melody only</option>
+          <option value="chords" data-i18n="mix.chords">Chords only</option>
+        </select>
+        <select id="sound" data-i18n-aria="play.sound">
+          <option value="24" data-i18n="sound.nylon">Nylon guitar</option>
+          <option value="25" data-i18n="sound.steel">Steel guitar</option>
+        </select>
+      </div>
+      <div class="group segmented" role="group" data-i18n-aria="view.label">
+        <button class="seg" data-view="both" aria-pressed="true" data-i18n="view.both">Staff + Tab</button>
+        <button class="seg" data-view="staff" aria-pressed="false" data-i18n="view.staff">Staff</button>
+        <button class="seg" data-view="tab" aria-pressed="false" data-i18n="view.tab">Tab</button>
+      </div>
+    </div>
+
+    <main class="workspace">
+      <section class="score-area" aria-label="Score">
+        <div id="score-scroll" class="score-scroll">
+          <div id="score-overlay" class="score-overlay">
+            <div id="alphatab"></div>
+            <div id="selection-layer" class="selection-layer" aria-hidden="true"></div>
+          </div>
+          <div class="empty-state">
+            <h2 data-i18n="empty.title">Open a score to begin</h2>
+            <p data-i18n="empty.text"></p>
+            <p class="muted" data-i18n="open.drop"></p>
+            <p class="muted small" data-i18n="open.formats"></p>
+            <p class="muted small" data-i18n="app.privacy"></p>
+          </div>
+        </div>
+      </section>
+      <aside class="side">
+        <div class="panel-tabs" role="tablist">
+          <button role="tab" data-tab="overview" aria-selected="true" aria-controls="panel" data-i18n="tabs.overview">Overview</button>
+          <button role="tab" data-tab="note" aria-selected="false" aria-controls="panel" tabindex="-1" data-i18n="tabs.note">Note</button>
+          <button role="tab" data-tab="chord" aria-selected="false" aria-controls="panel" tabindex="-1" data-i18n="tabs.chord">Chord</button>
+          <button role="tab" data-tab="tab" aria-selected="false" aria-controls="panel" tabindex="-1" data-i18n="tabs.tab">Tab</button>
+          <button role="tab" data-tab="export" aria-selected="false" aria-controls="panel" tabindex="-1" data-i18n="tabs.export">Export</button>
+        </div>
+        <div class="segmented detail-toggle" role="group">
+          <button class="seg" data-detail="beginner" aria-pressed="true" data-i18n="mode.beginner">Beginner</button>
+          <button class="seg" data-detail="detailed" aria-pressed="false" data-i18n="mode.detailed">Detailed</button>
+        </div>
+        <div id="panel" class="panel" role="tabpanel" aria-live="polite"></div>
+      </aside>
+    </main>
+
+    <footer class="fretboard-bar">
+      <div id="fretboard" class="fretboard-wrap"></div>
+      <p id="fb-status" class="muted small" aria-live="polite"></p>
+    </footer>
+
+    <div id="popover" class="popover" role="dialog" hidden></div>
+    <div class="drop-overlay" aria-hidden="true"><p data-i18n="open.drop"></p></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
