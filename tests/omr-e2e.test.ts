@@ -22,17 +22,19 @@ interface Page {
   dir: string;
   title: string;
   truth: string;
-  /** measured accuracy, kept as a floor so regressions show up */
+  /** measured accuracy, kept as a floor so regressions show up: oemer alone, and with the refinement */
   min: { events: number; pitches: number };
+  refined: { events: number; pitches: number };
 }
 
 const PAGES: Page[] = [
-  { name: 'Aura Lee (rendered page)', dir: '.', title: 'Aura Lee', truth: join(__dirname, '..', 'public', 'samples', 'aura-lee.musicxml'), min: { events: 0.91, pitches: 0.91 } },
-  { name: 'Rhythm Study (rendered page)', dir: 'rhythm', title: 'Rhythm Study', truth: join(omr, 'rhythm-study.musicxml'), min: { events: 0.66, pitches: 0.79 } },
-  { name: 'Rhythm Study (phone photo)', dir: 'rhythm-photo', title: 'Rhythm Study', truth: join(omr, 'rhythm-study.musicxml'), min: { events: 0.64, pitches: 0.74 } },
+  { name: 'Aura Lee (rendered page)', dir: '.', title: 'Aura Lee', truth: join(__dirname, '..', 'public', 'samples', 'aura-lee.musicxml'), min: { events: 0.91, pitches: 0.91 }, refined: { events: 1, pitches: 1 } },
+  { name: 'Rhythm Study (rendered page)', dir: 'rhythm', title: 'Rhythm Study', truth: join(omr, 'rhythm-study.musicxml'), min: { events: 0.66, pitches: 0.79 }, refined: { events: 1, pitches: 1 } },
+  { name: 'Ledger Study (rendered page, held out)', dir: 'ledger', title: 'Ledger Study', truth: join(omr, 'ledger-study.musicxml'), min: { events: 0.67, pitches: 0.88 }, refined: { events: 1, pitches: 1 } },
+  { name: 'Rhythm Study (phone photo)', dir: 'rhythm-photo', title: 'Rhythm Study', truth: join(omr, 'rhythm-study.musicxml'), min: { events: 0.64, pitches: 0.74 }, refined: { events: 0.97, pitches: 0.97 } },
 ];
 
-export function recognise(dir: string, title: string) {
+export function recognise(dir: string, title: string, refine = true) {
   const ref = JSON.parse(read(dir, 'reference.json').toString('utf8'));
   const m = mapsFromPacked(ref.width, ref.height, new Uint8Array(gunzipSync(read(dir, 'maps.u8.gz'))));
   const a = new Uint8Array(m.staff.length);
@@ -41,14 +43,16 @@ export function recognise(dir: string, title: string) {
     a[i] = m.staff[i] ? 1 : m.symbols[i] ? 2 : 0;
     b[i] = m.stemsRests[i] ? 1 : m.notehead[i] ? 2 : m.clefsKeys[i] ? 3 : 0;
   }
-  return runPostprocess(ref.width, ref.height, [a, b], loadSvm(), title);
+  return runPostprocess(ref.width, ref.height, [a, b], loadSvm(), title, undefined, { refine });
 }
 
 const results: { page: string; acc: Accuracy }[] = [];
 
 describe.each(PAGES)('OMR end to end: $name', (page) => {
-  let cached: ReturnType<typeof recognise> | undefined;
-  const result = () => (cached ??= recognise(page.dir, page.title));
+  let raw: ReturnType<typeof recognise> | undefined;
+  let refined: ReturnType<typeof recognise> | undefined;
+  const result = () => (raw ??= recognise(page.dir, page.title, false));
+  const improved = () => (refined ??= recognise(page.dir, page.title, true));
 
   it('writes the same MusicXML as oemer', () => {
     const expected = read(page.dir, 'oemer-reference.musicxml').toString('utf8').replace(/\r\n/g, '\n');
@@ -58,16 +62,28 @@ describe.each(PAGES)('OMR end to end: $name', (page) => {
     expect(first === -1 && a.length === b.length ? 'identical' : `line ${first + 1}: got ${JSON.stringify(a[first])} expected ${JSON.stringify(b[first])}`).toBe('identical');
   });
 
-  it('reaches its recorded note accuracy', () => {
+  it("reaches oemer's recorded note accuracy (refinement off)", () => {
     const truth = scoreFromMusicXml(readFileSync(page.truth, 'utf8'));
-    const got = scoreFromMusicXml(result().musicxml);
-    const acc = accuracy(truth, got);
-    results.push({ page: page.name, acc });
-    console.log(`${page.name}: events ${(acc.events * 100).toFixed(1)}%, pitches ${(acc.pitches * 100).toFixed(1)}%, notes ${acc.foundNotes}/${acc.truthNotes}, bars ${acc.bars[0]}/${acc.bars[1]}
-  truth  |  recognised
-${barDiff(truth, got)}`);
+    const acc = accuracy(truth, scoreFromMusicXml(result().musicxml));
     expect(acc.events).toBeGreaterThanOrEqual(page.min.events);
     expect(acc.pitches).toBeGreaterThanOrEqual(page.min.pitches);
+  });
+
+  it('is at least as accurate with the StaffLens refinement', () => {
+    const truth = scoreFromMusicXml(readFileSync(page.truth, 'utf8'));
+    const before = accuracy(truth, scoreFromMusicXml(result().musicxml));
+    const got = scoreFromMusicXml(improved().musicxml);
+    const acc = accuracy(truth, got);
+    results.push({ page: page.name, acc });
+    const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+    console.log(`${page.name}: events ${pct(before.events)} → ${pct(acc.events)}, pitches ${pct(before.pitches)} → ${pct(acc.pitches)}, notes ${acc.foundNotes}/${acc.truthNotes}, bars ${acc.bars[0]}/${acc.bars[1]}
+  refinement: ${JSON.stringify(improved().refined)}
+  truth  |  recognised
+${barDiff(truth, got)}`);
+    expect(acc.events).toBeGreaterThanOrEqual(before.events);
+    expect(acc.pitches).toBeGreaterThanOrEqual(before.pitches);
+    expect(acc.events).toBeGreaterThanOrEqual(page.refined.events);
+    expect(acc.pitches).toBeGreaterThanOrEqual(page.refined.pitches);
   });
 }, 60000);
 

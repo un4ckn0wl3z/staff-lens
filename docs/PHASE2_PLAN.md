@@ -101,6 +101,35 @@ Found and fixed in StaffLens while testing the photo:
 - Chord OCR on the photo found 4 of 9 symbols (small, blurred text); it places none wrongly relative to the
   recognised bars.
 
+## Refinement after oemer (2026-11-12)
+
+`src/omr/refine.ts` runs after the faithful oemer port (`runPostprocess(..., { refine })`, on in the app; the
+byte-identical fidelity tests run with it off). It works only from the model maps and oemer's intermediate results:
+
+| Pass | oemer's error it fixes | How |
+|---|---|---|
+| Key signature | flats split between model layers are lost; on the photo the flat was read as a sharp | accidental-sized shapes right after the clef; sharp vs flat from stroke count and where the ink sits, checked against the standard order of key positions |
+| Staff header | a "4" of the time signature read as a barline and as a note | time signature found as two stacked figures or one staff-high shape that is wide in both staff halves; barlines and notes inside clef + key + time are dropped |
+| Stray notes | the ♩ of a tempo mark read as a note above the staff | notes needing ledger lines are dropped when the staff map shows none |
+| Hollow heads | half notes the model marks too faintly | ring-shaped head-sized band (stem pixels joined to the head are cut off) with a stem of ≥ 2.3 staff spaces; added as a half-note group |
+| Rests | oemer's area filter drops whole/half rests and thin eighth rests | stem/rest-layer shapes classified by size and staff position (block on line 2 / line 3, quarter, eighth); shapes touching a note or right in front of one are skipped |
+| Accidentals in front of notes | flats and naturals are not found | shape just left of the head: one stroke + low bowl = flat, two offset strokes = natural |
+| Dots | missed and invented augmentation dots | a bar that is one dot away from the most common bar length gets that dot added or removed; dots seen next to a head break ties |
+
+Note accuracy (pitch and length of every note and rest / pitches), oemer → with refinement:
+
+| Page | Notes + rests | Pitches |
+|---|---|---|
+| Aura Lee, rendered | 91.7% → 100% | 91.7% → 100% |
+| Rhythm Study, rendered | 66.7% → 100% | 79.5% → 100% |
+| Ledger Study, rendered (written after the passes, as a check) | 67.7% → 100% | 88.0% → 100% |
+| Rhythm Study, phone photo | 64.4% → 97.8% | 74.4% → 97.4% (one blurred ♭ missed) |
+
+Caveat: the Ledger Study was held out at first (87% → 93.5% before it was looked at), then two fixes came from it
+(the "half or whole" label in the dot pass, and the time-signature shape check). All four pages are clean or
+synthetic; real photos and other engravers will show new errors. The thresholds are in staff spaces, so they do
+not depend on resolution, but they were set on alphaTab's engraving.
+
 ## M3 results (2026-11-12)
 
 - Model I/O (checked with onnxruntime-web): input `uint8` NHWC, **BGR** channel order (oemer reads with OpenCV).

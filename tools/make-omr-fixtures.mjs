@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests', 'fixtures', 'omr');
 
 // divisions = 4 (a sixteenth is 1)
-const DUR = { w: [16, 'whole', false], h: [8, 'half', false], dq: [6, 'quarter', true], q: [4, 'quarter', false], de: [3, 'eighth', true], e: [2, 'eighth', false], s: [1, '16th', false] };
+const DUR = { w: [16, 'whole', false], dh: [12, 'half', true], h: [8, 'half', false], dq: [6, 'quarter', true], q: [4, 'quarter', false], de: [3, 'eighth', true], e: [2, 'eighth', false], s: [1, '16th', false] };
 const KINDS = { '': ['major', ''], m: ['minor', 'm'], 7: ['dominant', '7'] };
 
 function harmony(symbol) {
@@ -77,3 +77,26 @@ const rhythmStudy = score({
 });
 writeFileSync(join(outDir, 'rhythm-study.musicxml'), rhythmStudy);
 console.log('wrote rhythm-study.musicxml');
+
+// Held-out page for the refinement layer: sharp key, ledger lines above and below, accidentals, rests.
+const ledgerStudy = score({
+  title: 'Ledger Study',
+  composer: 'StaffLens test page',
+  fifths: 2,
+  tempo: 80,
+  bars: [
+    [[['D', 0]], 'D4:q F#4:e A4:e D5:h'],
+    [[['A7', 0]], 'C#6:q B5:q A5:h'],
+    [[['G', 0]], 'r:q B5:e G5:e D5:q r:q'],
+    [[['D', 0]], 'A3:h r:h'],
+    [[['Bm', 0]], 'B3:e C#4:e D4:e E4:e F#4:q r:e Fn4:e'],
+    [[['Em', 0]], 'G4:dh r:q'],
+    [[['A7', 0]], 'E5:q Bb4:q C#5:q A4:q'],
+    [[['D', 0]], 'D5:w'],
+    [[], 'r:w*'],
+    [[['D', 0]], 'F#5:h D4:h'],
+  ],
+});
+writeFileSync(join(outDir, 'ledger-study.musicxml'), ledgerStudy);
+console.log('wrote ledger-study.musicxml');
+
