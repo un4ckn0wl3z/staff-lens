@@ -116,6 +116,11 @@ byte-identical fidelity tests run with it off). It works only from the model map
 | Accidentals in front of notes | flats and naturals are not found | shape just left of the head: one stroke + low bowl = flat, two offset strokes = natural |
 | Dots | missed and invented augmentation dots | a bar that is one dot away from the most common bar length gets that dot added or removed; dots seen next to a head break ties |
 
+Tempo: oemer writes ♩ = 90 for every scan. The stray-note pass remembers the dropped tempo-mark note above the first
+system; after the chord OCR, the strip right of it is read digits-only (`readTempoMark`) and the number becomes the
+score's tempo (Aura Lee 92, Rhythm Study 96, Ledger Study 80 in the tests). The editor's "Tempo of the score" field
+sets it by hand, and the toolbar shows and takes the playback tempo in BPM next to the % slider.
+
 Note accuracy (pitch and length of every note and rest / pitches), oemer → with refinement:
 
 | Page | Notes + rests | Pitches |

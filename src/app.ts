@@ -21,7 +21,7 @@ import { exportPanelHtml, tabPanelHtml } from './ui/forms';
 import { Fretboard, type FretHighlight } from './ui/fretboard';
 import { ScanView, type ScanResult } from './ui/scanView';
 import { editPanelHtml } from './ui/editPanel';
-import { addChordsToScore, applyEdit, barLengthIssues, beatAt, beatRefOf, defaultWrittenPitch, EditHistory, finishScore, materializeChords, stepPitch, type BeatRef, type EditOp } from './model/edit';
+import { addChordsToScore, applyEdit, barLengthIssues, setStartTempo, beatAt, beatRefOf, defaultWrittenPitch, EditHistory, finishScore, materializeChords, stepPitch, type BeatRef, type EditOp } from './model/edit';
 import type { Segmentation } from './omr/runner';
 import { isImageFile } from './omr/imageInput';
 
@@ -76,14 +76,14 @@ export class App {
       (scan, seg) => {
         this.omr = { scan, seg };
       },
-      (xml, name, chords) => {
+      (xml, name, chords, tempo) => {
         this.setLoading(true);
         // oemer repeats a bar number at system breaks; number bars 1, 2, 3… for display
         let n = 0;
         const numbered = xml.replace(/<measure number="\d+"/g, () => `<measure number="${++n}"`);
         this.loadBytes(new TextEncoder().encode(numbered), name)
           .then(() => {
-            if (chords.length) this.addRecognizedChords(chords);
+            if (chords.length || tempo) this.addRecognizedChords(chords, tempo);
             this.toast(t('omr.opened'));
           })
           .catch((e) => this.toast(t('open.error', { msg: (e as Error).message }), true))
@@ -341,11 +341,31 @@ export class App {
     this.renderPanel();
     this.updateToolbarState();
     this.applyMix();
+    this.setSpeed(this.speed); // the score's tempo may have changed: refresh the BPM field
+  }
+
+  /** Playback speed as a share of the score's tempo (the slider and the BPM field both set it). */
+  private speed = 1;
+
+  /** Starting tempo of the loaded score (♩ per minute). */
+  private get scoreTempo(): number {
+    return this.model?.tempo || 120;
+  }
+
+  /** Sets the playback speed and keeps the slider, the % label and the BPM field in step. */
+  private setSpeed(speed: number, from: 'slider' | 'bpm' | 'score' = 'score'): void {
+    this.speed = Math.max(0.25, Math.min(2, speed));
+    this.api.playbackSpeed = this.speed;
+    const slider = $<HTMLInputElement>('#tempo');
+    if (from !== 'slider') slider.value = String(Math.round(this.speed * 100));
+    $('#tempo-value').textContent = `${Math.round(this.speed * 100)}%`;
+    const bpm = $<HTMLInputElement>('#bpm');
+    if (from !== 'bpm') bpm.value = String(Math.round(this.scoreTempo * this.speed));
+    bpm.title = t('play.bpmTitle', { bpm: Math.round(this.scoreTempo) });
   }
 
   private applyPlaybackOptions(): void {
-    const speed = Number(($('#tempo') as HTMLInputElement).value) / 100;
-    this.api.playbackSpeed = speed;
+    this.setSpeed(this.speed);
     this.api.metronomeVolume = ($('#metronome') as HTMLInputElement).checked ? 1 : 0;
     this.api.countInVolume = ($('#countin') as HTMLInputElement).checked ? 1 : 0;
     this.applyLoop();
@@ -816,6 +836,12 @@ export class App {
         if (ref && input) this.applyEditOp({ kind: 'chord', ref, text: input.value });
         break;
       }
+      case 'ed-tempo-set': {
+        const input = $('#panel').querySelector<HTMLInputElement>('input[name=ed-tempo]');
+        const v = Number(input?.value);
+        if (v > 0) this.applyEditOp({ kind: 'tempo', bpm: v });
+        break;
+      }
       case 'ed-chord-del': {
         const ref = this.currentRef();
         if (ref) this.applyEditOp({ kind: 'chord', ref, text: null });
@@ -885,9 +911,10 @@ export class App {
   }
 
   /** Puts chord symbols found by OCR onto the beats of the recognised score (not an undoable edit). */
-  private addRecognizedChords(chords: { measure: number; tick: number; text: string }[]): void {
+  private addRecognizedChords(chords: { measure: number; tick: number; text: string }[], tempo: number | null = null): void {
     if (!this.base || !this.model) return;
     addChordsToScore(this.base, this.part, chords);
+    if (tempo) setStartTempo(this.base, tempo);
     this.afterScoreChange(null, null, false);
     this.history.clear();
     this.setTab('overview');
@@ -925,6 +952,7 @@ export class App {
       canRedo: this.history.canRedo,
       issues: this.model ? barLengthIssues(this.model, this.part) : [],
       quarterTicks: 960,
+      tempo: this.scoreTempo,
     };
   }
 
@@ -1120,9 +1148,18 @@ export class App {
       this.api.play();
     });
     const tempo = $<HTMLInputElement>('#tempo');
-    tempo.addEventListener('input', () => {
-      $('#tempo-value').textContent = `${tempo.value}%`;
-      this.api.playbackSpeed = Number(tempo.value) / 100;
+    tempo.addEventListener('input', () => this.setSpeed(Number(tempo.value) / 100, 'slider'));
+    const bpm = $<HTMLInputElement>('#bpm');
+    const fromBpm = () => {
+      const v = Number(bpm.value);
+      if (v > 0) this.setSpeed(v / this.scoreTempo, 'bpm');
+    };
+    bpm.addEventListener('change', () => {
+      fromBpm();
+      bpm.value = String(Math.round(this.scoreTempo * this.speed)); // show the clamped value
+    });
+    bpm.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') bpm.blur();
     });
     $('#metronome').addEventListener('change', () => this.applyPlaybackOptions());
     $('#countin').addEventListener('change', () => this.applyPlaybackOptions());

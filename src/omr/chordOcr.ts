@@ -149,12 +149,32 @@ export function pngCropper(page: ImageData): (rect: Rect) => Promise<Blob> {
   };
 }
 
+/**
+ * Reads the number of a tempo mark (♩ = 96): OCR, digits only, of the strip right of the mark's note.
+ * `note` is in layout pixels; `scale` maps them to the OCR image. Returns ♩ per minute or null.
+ */
+export async function readTempoMark(engine: OcrEngine, note: [number, number, number, number], unit: number, width: number, height: number, scale = 1): Promise<number | null> {
+  const u = unit * scale;
+  const [x0, y0, x1, y1] = note.map((v) => v * scale);
+  const cy = (y0 + y1) / 2;
+  const left = Math.max(0, Math.round(x1 + 0.15 * u));
+  const top = Math.max(0, Math.round(cy - 2.2 * u));
+  const rect = { left, top, width: Math.max(1, Math.min(width - left, Math.round(6 * u))), height: Math.max(1, Math.min(height - top, Math.round(3 * u))) };
+  void x0;
+  const found = await engine.words(rect, { digits: true });
+  const text = found.map((f) => f.text).join('');
+  const m = /=\s*(\d{2,3})/.exec(text) ?? /^(\d{2,3})$/.exec(text.trim());
+  if (!m) return null;
+  const bpm = Number(m[1]);
+  return bpm >= 30 && bpm <= 300 ? bpm : null;
+}
+
 /** Words read in the last recognizeChords() call (for debugging and tests). */
 export let lastWords: (OcrWord & { group: number })[] = [];
 
 export interface OcrEngine {
-  /** Recognise words inside `rect` of the image (coordinates in image pixels). */
-  words(rect: Rect): Promise<OcrWord[]>;
+  /** Recognise words inside `rect` of the image (coordinates in image pixels); `digits` limits it to "=0-9". */
+  words(rect: Rect, opts?: { digits?: boolean }): Promise<OcrWord[]>;
   terminate(): Promise<void>;
 }
 
@@ -176,8 +196,16 @@ export async function createTesseractEngine(
     logger: () => undefined,
   });
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD, preserve_interword_spaces: '0' });
+  let digits = false;
   return {
-    async words(rect: Rect) {
+    async words(rect: Rect, opts?: { digits?: boolean }) {
+      const want = !!opts?.digits;
+      if (want !== digits) {
+        await worker.setParameters(
+          want ? { tessedit_char_whitelist: '=0123456789', tessedit_pageseg_mode: PSM.SINGLE_LINE } : { tessedit_char_whitelist: '', tessedit_pageseg_mode: PSM.SINGLE_WORD },
+        );
+        digits = want;
+      }
       type Input = Parameters<typeof worker.recognize>[0];
       const res =
         typeof image === 'function'

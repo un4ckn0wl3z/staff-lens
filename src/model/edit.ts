@@ -98,7 +98,8 @@ export type EditOp =
   | { kind: 'makeRest'; ref: BeatRef }
   | { kind: 'addNote'; ref: BeatRef; written: SpelledPitch; offset: number }
   | { kind: 'insertAfter'; ref: BeatRef; written: SpelledPitch | null; offset: number }
-  | { kind: 'chord'; ref: BeatRef; text: string | null };
+  | { kind: 'chord'; ref: BeatRef; text: string | null }
+  | { kind: 'tempo'; bpm: number };
 
 export interface EditResult {
   /** Note to select after the edit, if any. */
@@ -107,9 +108,26 @@ export interface EditResult {
   ref: BeatRef | null;
 }
 
+/** Sets the score's starting tempo (the first bar's tempo automation; alphaTab derives score.tempo from it). */
+export function setStartTempo(score: AtScore, bpm: number): number {
+  const value = Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(bpm)));
+  const mb = score.masterBars[0];
+  if (!mb) return value;
+  const first = mb.tempoAutomations.find((a) => a.ratioPosition === 0) ?? mb.tempoAutomations[0];
+  if (first) first.value = value;
+  else mb.tempoAutomations.unshift(alphaTab.model.Automation.buildTempoAutomation(false, 0, value, 2));
+  return value;
+}
+
+export const MIN_BPM = 20;
+export const MAX_BPM = 400;
+
 /** Applies an edit in place; call finishScore() afterwards. */
 export function applyEdit(score: AtScore, op: EditOp): EditResult {
   switch (op.kind) {
+    case 'tempo':
+      setStartTempo(score, op.bpm);
+      return { noteId: null, ref: null };
     case 'pitch': {
       const note = noteAt(score, op.noteId);
       if (!note) throw new Error('note not found');

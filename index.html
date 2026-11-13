@@ -54,8 +54,9 @@
       </div>
       <div class="group">
         <label class="inline-field" for="tempo"><span data-i18n="play.tempo">Tempo</span></label>
-        <input id="tempo" type="range" min="50" max="150" step="5" value="100" />
+        <input id="tempo" type="range" min="25" max="200" step="5" value="100" />
         <output id="tempo-value">100%</output>
+        <label class="inline-field bpm-field"><input id="bpm" type="number" min="20" max="400" step="1" inputmode="numeric" data-i18n-aria="play.bpm" aria-label="BPM" /> <span data-i18n="play.bpmUnit">BPM</span></label>
       </div>
       <div class="group">
         <label class="check"><input id="metronome" type="checkbox" /> <span data-i18n="play.metronome">Metronome</span></label>

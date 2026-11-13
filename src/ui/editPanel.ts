@@ -15,6 +15,8 @@ export interface EditPanelState {
   canRedo: boolean;
   issues: BarIssue[];
   quarterTicks: number;
+  /** Starting tempo of the score (♩ per minute). */
+  tempo: number;
 }
 
 const DURS: [number, string][] = [
@@ -69,6 +71,11 @@ export function editPanelHtml(s: EditPanelState): string {
     <input class="ed-chord" name="ed-chord" value="${esc(s.chordAtBeat?.text ?? '')}" placeholder="G7, Am, Cmaj7…" aria-label="${esc(t('ed.chord'))}" ${none ? 'disabled' : ''}>
     ${btn('ed-chord-set', esc(t('ed.chordSet')), t('ed.chordSet'), '', none)}
     ${btn('ed-chord-del', esc(t('ed.chordDel')), t('ed.chordDel'), '', none || !s.chordAtBeat)}
+  </div></section>`);
+
+  out.push(`<section class="info-block"><h3>${esc(t('ed.tempo'))}</h3><p class="muted small">${esc(t('ed.tempoHint'))}</p><div class="btn-row">
+    <label class="inline-field">♩ = <input class="ed-tempo" name="ed-tempo" type="number" min="20" max="400" step="1" inputmode="numeric" value="${Math.round(s.tempo)}" aria-label="${esc(t('ed.tempo'))}"></label>
+    ${btn('ed-tempo-set', esc(t('ed.tempoSet')), t('ed.tempoSet'))}
   </div></section>`);
 
   out.push(`<div class="btn-row">${btn('ed-undo', `↶ ${esc(t('ed.undo'))}`, `${t('ed.undo')} (Ctrl+Z)`, '', !s.canUndo)}${btn('ed-redo', `↷ ${esc(t('ed.redo'))}`, `${t('ed.redo')} (Ctrl+Y)`, '', !s.canRedo)}</div>`);

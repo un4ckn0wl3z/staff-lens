@@ -35,6 +35,8 @@ export interface RefineReport {
   dots: { what: string; x: number; dot: boolean }[];
   /** per "group:track": x where clef, key and time signature end */
   headers: Record<string, number>;
+  /** The note of a tempo mark (♩ = 96) above the first system, if one was dropped: the number is to its right. */
+  tempoNote: BBox | null;
 }
 
 interface Comp {
@@ -399,6 +401,9 @@ function refineStrayNotes(ctx: OemerContext, flat: Staff[], notes: NoteHead[], g
     if (hasLedger(ctx, st, n, pos)) return;
     n.invalid = true;
     report.droppedNotes.push(i);
+    // above the first system: the note of a tempo mark (the leftmost one if there are several)
+    const first = Math.min(...flat.map((s) => s.group ?? 0));
+    if (pos > 9.5 && st.group === first && (!report.tempoNote || n.bbox[0] < report.tempoNote[0])) report.tempoNote = n.bbox;
   });
   void groups;
 }
@@ -666,7 +671,7 @@ function refineDots(ctx: OemerContext, flat: Staff[], groupMap: Int32Array, note
 /** Runs all refinements in place. */
 export function refine(ctx: OemerContext, staffs: Staff[][], notes: NoteHead[], groups: NoteGroup[], groupMap: Int32Array, sym: Symbols): RefineReport {
   const flat = staffs.flat();
-  const report: RefineReport = { removedBarlines: [], rests: [], keys: [], droppedNotes: [], accidentals: [], addedNotes: [], dots: [], headers: {} };
+  const report: RefineReport = { removedBarlines: [], rests: [], keys: [], droppedNotes: [], accidentals: [], addedNotes: [], dots: [], headers: {}, tempoNote: null };
   refineStrayNotes(ctx, flat, notes, groups, report);
   const headerEnd = refineKeys(ctx, flat, groupMap, notes, sym, report);
   report.headers = Object.fromEntries(headerEnd);

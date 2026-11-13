@@ -40,6 +40,8 @@ export type InferenceMessage =
       /** Page layout for chord-symbol OCR. */
       systems: SystemLayout[];
       timeline: TimelineEntry[];
+      /** Box of the tempo mark's note (page pixels), for reading its number. */
+      tempoNote: [number, number, number, number] | null;
     }
   | { type: 'error'; message: string };
 
@@ -134,6 +136,7 @@ async function run(req: InferenceRequest): Promise<void> {
   let error: string | null = null;
   let systems: SystemLayout[] = [];
   let timeline: TimelineEntry[] = [];
+  let tempoNote: [number, number, number, number] | null = null;
   try {
     const steps = ['staffs', 'noteheads', 'groups', 'symbols', 'rhythm', 'build'];
     post({ type: 'progress', stage: 'notes', step: 'classifiers', model: 1, done: 0, total: steps.length });
@@ -142,10 +145,11 @@ async function run(req: InferenceRequest): Promise<void> {
       post({ type: 'progress', stage: 'notes', step, model: 1, done: steps.indexOf(step), total: steps.length }),
     );
     ({ musicxml, notes, bars, systems, timeline } = res);
+    tempoNote = res.refined?.tempoNote ?? null;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
-  post({ type: 'done', image, maps, provider, threads, ms: performance.now() - t0, musicxml, notes, bars, error, systems, timeline }, [image.data.buffer, ...maps.map((x) => x.buffer)]);
+  post({ type: 'done', image, maps, provider, threads, ms: performance.now() - t0, musicxml, notes, bars, error, systems, timeline, tempoNote }, [image.data.buffer, ...maps.map((x) => x.buffer)]);
 }
 
 self.onmessage = (e: MessageEvent<InferenceRequest>) => {

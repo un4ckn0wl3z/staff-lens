@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createTesseractEngine, lastWords, normalizeChordText, placeChords, recognizeChords } from '../src/omr/chordOcr';
+import { createTesseractEngine, lastWords, normalizeChordText, placeChords, readTempoMark, recognizeChords } from '../src/omr/chordOcr';
 import { mapsFromPacked } from '../src/omr/oemer/context';
 import { runPostprocess } from '../src/omr/oemer/pipeline';
 import { gunzipSync } from 'node:zlib';
@@ -76,6 +76,36 @@ describe('chord-symbol OCR', () => {
         ['E7', 0],
         ['A7', 1920],
       ]);
+    } finally {
+      await engine.terminate();
+    }
+  }, 120000);
+
+  it.each([
+    ['.', 'aura-lee-staff.png', 92],
+    ['rhythm', 'rhythm-study.png', 96],
+    ['ledger', 'ledger-study.png', 80],
+  ])('reads the tempo mark (%s)', async (sub, file, bpm) => {
+    const r = JSON.parse(readFileSync(join(dir, sub, 'reference.json'), 'utf8'));
+    const m = mapsFromPacked(r.width, r.height, new Uint8Array(gunzipSync(readFileSync(join(dir, sub, 'maps.u8.gz')))));
+    const a = new Uint8Array(m.staff.length);
+    const b = new Uint8Array(m.staff.length);
+    for (let i = 0; i < a.length; i++) {
+      a[i] = m.staff[i] ? 1 : m.symbols[i] ? 2 : 0;
+      b[i] = m.stemsRests[i] ? 1 : m.notehead[i] ? 2 : m.clefsKeys[i] ? 3 : 0;
+    }
+    const res = runPostprocess(r.width, r.height, [a, b], loadSvm(), 'x');
+    expect(res.refined?.tempoNote).toBeTruthy();
+    const png = readFileSync(join(dir, file));
+    const img = PNG.sync.read(png);
+    const engine = await createTesseractEngine(png, {
+      workerPath: undefined as unknown as string,
+      corePath: undefined as unknown as string,
+      langPath: join(__dirname, '..', 'node_modules', '@tesseract.js-data', 'eng', '4.0.0_best_int'),
+    });
+    try {
+      const got = await readTempoMark(engine, res.refined!.tempoNote!, res.systems[0].unit, img.width, img.height, img.width / r.width);
+      expect(got).toBe(bpm);
     } finally {
       await engine.terminate();
     }

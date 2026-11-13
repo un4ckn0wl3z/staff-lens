@@ -6,7 +6,7 @@ import { t } from '../i18n';
 import { clearEdgeBands, estimateSkew, isFullQuad, rectifiedSize, rotate, rotate90, toGray, warpPerspective, type Img, type Pt } from '../omr/geometry';
 import { drawImg, loadImageFile, openPdf, type PdfHandle } from '../omr/imageInput';
 import { LAYER_COLORS, OmrRunner, overlayImage, type ProgressInfo, type Segmentation } from '../omr/runner';
-import { createTesseractEngine, pngCropper, recognizeChords, type ChordHit } from '../omr/chordOcr';
+import { createTesseractEngine, pngCropper, readTempoMark, recognizeChords, type ChordHit } from '../omr/chordOcr';
 import type { Quality } from '../omr/tiling';
 import type { StringKey } from '../i18n';
 
@@ -43,7 +43,7 @@ export class ScanView {
   constructor(
     private toast: (msg: string, error?: boolean) => void,
     private onSegmented: ((r: ScanResult, seg: Segmentation) => void) | null = null,
-    private onOpen: ((musicxml: string, fileName: string, chords: ChordHit[]) => void) | null = null,
+    private onOpen: ((musicxml: string, fileName: string, chords: ChordHit[], tempo: number | null) => void) | null = null,
   ) {
     this.root = document.createElement('div');
     this.root.className = 'scan-view';
@@ -212,8 +212,9 @@ export class ScanView {
           const name = this.fileName.replace(/\.[^.]+$/, '') + (this.pdf ? `-p${this.page + 1}` : '') + '.musicxml';
           const xml = this.seg.musicxml;
           const chords = this.seg.chords;
+          const tempo = this.seg.tempo;
           this.close();
-          this.onOpen(xml, name, chords);
+          this.onOpen(xml, name, chords, tempo);
         }
         break;
       case 'show-seg':
@@ -312,7 +313,7 @@ export class ScanView {
       }
       const secs = Math.round((performance.now() - started) / 1000);
       if (seg.musicxml && seg.notes > 0) {
-        this.status(t('omr.found', { notes: seg.notes, bars: seg.bars, s: secs, provider: how }) + ' ' + t('omr.foundChords', { n: seg.chords.length }));
+        this.status(t('omr.found', { notes: seg.notes, bars: seg.bars, s: secs, provider: how }) + ' ' + t('omr.foundChords', { n: seg.chords.length }) + (seg.tempo ? ' ' + t('omr.foundTempo', { bpm: seg.tempo }) : ''));
         openBtn.hidden = false;
         openBtn.focus();
       } else {
@@ -341,7 +342,10 @@ export class ScanView {
       const base = new URL(import.meta.env.BASE_URL, location.href).href;
       const engine = await createTesseractEngine(pngCropper(imageData), { workerPath: `${base}ocr/worker.min.js`, corePath: `${base}ocr/core/`, langPath: `${base}ocr/lang` });
       try {
-        return await recognizeChords(engine, toGray(page), width, height, seg.systems, seg.timeline, width / seg.image.width);
+        const scale = width / seg.image.width;
+        const chords = await recognizeChords(engine, toGray(page), width, height, seg.systems, seg.timeline, scale);
+        if (seg.tempoNote) seg.tempo = await readTempoMark(engine, seg.tempoNote, seg.systems[0]?.unit ?? 20, width, height, scale).catch(() => null);
+        return chords;
       } finally {
         await engine.terminate();
       }

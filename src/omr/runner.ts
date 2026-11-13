@@ -21,6 +21,9 @@ export interface Segmentation {
   timeline: TimelineEntry[];
   /** Chord symbols read by OCR (filled in after the notes). */
   chords: ChordHit[];
+  tempoNote: [number, number, number, number] | null;
+  /** ♩ per minute read from the tempo mark (filled in after the notes). */
+  tempo: number | null;
 }
 
 export type ProgressInfo = Extract<InferenceMessage, { type: 'progress' }>;
@@ -44,7 +47,7 @@ export class OmrRunner {
         if (m.type === 'progress') onProgress(m);
         else if (m.type === 'done') {
           this.finish();
-          resolve({ image: m.image, maps: m.maps, provider: m.provider, threads: m.threads, ms: m.ms, musicxml: m.musicxml, notes: m.notes, bars: m.bars, error: m.error, systems: m.systems, timeline: m.timeline, chords: [] });
+          resolve({ image: m.image, maps: m.maps, provider: m.provider, threads: m.threads, ms: m.ms, musicxml: m.musicxml, notes: m.notes, bars: m.bars, error: m.error, systems: m.systems, timeline: m.timeline, chords: [], tempoNote: m.tempoNote, tempo: null });
         } else if (m.type === 'error') {
           this.finish();
           reject(new Error(m.message));
