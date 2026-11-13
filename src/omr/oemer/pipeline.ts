@@ -11,6 +11,9 @@ import { extractStaffs } from './staffline';
 import { extractSymbols } from './symbols';
 import { refine as refineSymbols, type RefineReport } from '../refine';
 
+/** Error message (also an i18n hint key in the scan view) when the page has no staff lines oemer can follow. */
+export const NO_STAFF = 'no staff lines found';
+
 export interface SystemLayout {
   group: number;
   /** Top of the system's first staff, page-image pixels. */
@@ -43,6 +46,7 @@ export function runPostprocess(
   const ctx = new OemerContext(mapsFromSegmentation(width, height, maps[0], maps[1]));
   onStage?.('staffs');
   const { staffs, zones } = extractStaffs(ctx);
+  if (staffs.flat().length === 0) throw new Error(NO_STAFF);
   onStage?.('noteheads');
   const notes = extractNoteheads(ctx, staffs, zones);
   onStage?.('groups');

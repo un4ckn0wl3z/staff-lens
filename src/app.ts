@@ -99,9 +99,20 @@ export class App {
 
   // ------------------------------------------------------------ alphaTab
 
+  /** The theme the page shows: the user's choice, else the system setting (the CSS does the same). */
+  private get theme(): 'dark' | 'light' {
+    const set = document.documentElement.dataset.theme;
+    if (set === 'dark' || set === 'light') return set;
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
   private setupAlphaTab(): void {
     const el = $('#alphatab');
-    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    const theme = this.theme;
+    // follow the system theme while the user has not picked one
+    window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+      if (!document.documentElement.dataset.theme) this.applyTheme();
+    });
     const c = THEME_COLORS[theme];
     this.api = new alphaTab.AlphaTabApi(el, {
       core: {
@@ -208,7 +219,7 @@ export class App {
 
   private applyTheme(): void {
     if (!this.api) return;
-    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    const theme = this.theme;
     const c = THEME_COLORS[theme];
     const res = this.api.settings.display.resources;
     const C = alphaTab.model.Color;

@@ -7,7 +7,8 @@
 //   - notes far outside the staff with no ledger lines (the note of a tempo mark),
 //   - flats and naturals in front of notes (oemer finds only sharps there),
 //   - half notes whose hollow head the model marks too faintly for oemer,
-//   - augmentation dots, using the bar length as a constraint.
+//   - augmentation dots, using the bar length as a constraint,
+//   - single-staff systems that oemer paired up as if they were piano grand staves.
 // Everything works from the model maps and oemer's intermediate results, so it is testable on the fixtures.
 
 import { label4, raster, type BBox } from './oemer/cv';
@@ -37,6 +38,10 @@ export interface RefineReport {
   headers: Record<string, number>;
   /** The note of a tempo mark (♩ = 96) above the first system, if one was dropped: the number is to its right. */
   tempoNote: BBox | null;
+  /** Note groups dropped for having more notes than any chord (clutter read as one giant chord). */
+  droppedGroups: number;
+  /** Staves per system oemer assumed, when they were split back into single-staff systems (else null). */
+  splitTracks: number | null;
 }
 
 interface Comp {
@@ -668,10 +673,68 @@ function refineDots(ctx: OemerContext, flat: Staff[], groupMap: Int32Array, note
   }
 }
 
+// ------------------------------------------------------------------ staves per system
+
+/**
+ * oemer decides how many staves make one system (piano = 2) from how much tall vertical ink the page has; dense
+ * single-line pages (or a scanned page edge) can fool it, and every second staff is then read as the bass clef of a
+ * piano part. In a real multi-staff system the barlines run through all its staves: when none does, each staff is
+ * made its own system with one part.
+ */
+function refineTracks(flat: Staff[], notes: NoteHead[], groups: NoteGroup[], sym: Symbols, report: RefineReport): void {
+  const T = new Set(flat.map((s) => s.track)).size;
+  if (T < 2) return;
+  // more than two staves per system cannot be written by the builder (oemer stops with an error); on photos it is
+  // usually vertical clutter (a music stand, a book's edge) that made oemer count them: read one staff at a time
+  const forced = T > 2;
+  if (!forced && sym.barlines.length < 2) return;
+  const systems = forced ? [] : [...new Set(flat.map((s) => s.group))];
+  for (const g of systems) {
+    const staves = flat.filter((s) => s.group === g);
+    if (new Set(staves.map((s) => s.track)).size < 2) continue; // a lone staff says nothing (odd number of staves)
+    const u = staves.reduce((a, s) => a + s.unitSize, 0) / staves.length;
+    const top = Math.min(...staves.map((s) => s.yUpper));
+    const bottom = Math.max(...staves.map((s) => s.yLower));
+    if (sym.barlines.some((b) => b.group === g && b.bbox[1] <= top + u && b.bbox[3] >= bottom - u)) return; // a real system
+  }
+  const remap = (g: number | null, t: number | null) => (g === null ? null : g * T + (t ?? 0));
+  for (const st of flat) {
+    st.group = remap(st.group, st.track);
+    st.track = 0;
+  }
+  for (const n of notes) {
+    n.group = remap(n.group, n.track);
+    n.track = 0;
+  }
+  for (const gr of groups) {
+    gr.group = remap(gr.group, gr.track);
+    gr.track = 0;
+  }
+  for (const list of [sym.clefs, sym.sfns, sym.rests] as { group: number | null; track: number | null }[][])
+    for (const x of list) {
+      x.group = remap(x.group, x.track);
+      x.track = 0;
+    }
+  for (const b of sym.barlines) b.group = findClosestStaffs(flat, (b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2)[0].group;
+  report.splitTracks = T;
+}
+
+/** A group with more notes than ten fingers can play is clutter (book edges, stand wires, glare), not a chord. */
+function refineHugeGroups(notes: NoteHead[], groups: NoteGroup[], report: RefineReport): void {
+  for (const g of groups) {
+    const ids = g.noteIds.filter((i) => !notes[i].invalid);
+    if (ids.length <= 10) continue;
+    for (const i of ids) notes[i].invalid = true;
+    report.droppedGroups++;
+  }
+}
+
 /** Runs all refinements in place. */
 export function refine(ctx: OemerContext, staffs: Staff[][], notes: NoteHead[], groups: NoteGroup[], groupMap: Int32Array, sym: Symbols): RefineReport {
   const flat = staffs.flat();
-  const report: RefineReport = { removedBarlines: [], rests: [], keys: [], droppedNotes: [], accidentals: [], addedNotes: [], dots: [], headers: {}, tempoNote: null };
+  const report: RefineReport = { removedBarlines: [], rests: [], keys: [], droppedNotes: [], accidentals: [], addedNotes: [], dots: [], headers: {}, tempoNote: null, splitTracks: null, droppedGroups: 0 };
+  refineTracks(flat, notes, groups, sym, report);
+  refineHugeGroups(notes, groups, report);
   refineStrayNotes(ctx, flat, notes, groups, report);
   const headerEnd = refineKeys(ctx, flat, groupMap, notes, sym, report);
   report.headers = Object.fromEntries(headerEnd);

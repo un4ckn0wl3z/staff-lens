@@ -288,8 +288,14 @@ export class ScanView {
   }
 
   private async recognize(): Promise<void> {
-    const image = this.result();
+    let image = this.result();
     if (!image) return;
+    // oemer finds staff lines only when they are close to horizontal: straighten what is left after the corners
+    const tilt = estimateSkew(image);
+    if (Math.abs(tilt) >= 1) {
+      image = clearEdgeBands(rotate(image, -tilt));
+      this.status(t('scan.straightened', { deg: tilt.toFixed(2) }));
+    }
     const progress = this.root.querySelector<HTMLElement>('.scan-progress')!;
     const bar = progress.querySelector('progress')!;
     const label = progress.querySelector<HTMLElement>('.progress-label')!;
@@ -317,7 +323,7 @@ export class ScanView {
         openBtn.hidden = false;
         openBtn.focus();
       } else {
-        this.status(seg.error ? t('omr.buildError', { msg: seg.error }) : t('omr.noNotes'));
+        this.status(seg.error === 'no staff lines found' ? t('omr.noStaff') : seg.error ? t('omr.buildError', { msg: seg.error }) : t('omr.noNotes'));
         openBtn.hidden = true;
       }
       this.onSegmented?.({ image, fileName: this.fileName, page: this.page }, seg);

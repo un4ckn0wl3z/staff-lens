@@ -135,6 +135,23 @@ Caveat: the Ledger Study was held out at first (87% → 93.5% before it was look
 synthetic; real photos and other engravers will show new errors. The thresholds are in staff spaces, so they do
 not depend on resolution, but they were set on alphaTab's engraving.
 
+## Real pages from the web (2026-11-13)
+
+Five free-licensed images from Wikimedia Commons, run through the app (fast quality, WebGPU). Images are not stored;
+The Troopers' model maps are (`tests/fixtures/omr/troopers/`, public domain) with a regression test.
+
+| Page | Result | What it showed |
+|---|---|---|
+| Hungarian folk song, 673×315 scan | 5 of ~40 notes | too small: about 6 px between staff lines; upscaling blurs it past what the model reads |
+| The Troopers (guitar part, 1900s scan, 15 single-line systems) | before: read as piano (2 staves per system, half the music in bass clef); after: 91 of ~100 bars, opening bars exact | oemer counted page-edge and stem ink as grand-staff braces → **refinement: split into single-staff systems when no barline spans a staff pair** |
+| Au Clair de la Lune (voice + piano, children's book) | melody pitches right, bars merged | three staves per system is outside what oemer's builder supports |
+| Photo of a sheet with notation + TAB on a guitar | before: crash; after straightening: 32 notes, mostly wrong | **auto-straighten before recognition** (residual 7° tilt left no staff lines); **clear "no staff lines" message** instead of a TypeError; TAB staves are read as notation (limitation) |
+| Photo of an open book on a music stand (curved, glare) | before: "unsupported number of tracks: 6"; after: a short, mostly wrong result | **more than 2 staves per system → one staff at a time**; **groups of more than 10 notes dropped** (clutter read as one 200-note chord) |
+
+Also found: chord OCR reads lyric words between systems as chords now and then (an "A" from "a lábad"), and is slow
+on text-heavy pages. And a bug outside OMR: with the system in dark mode and no theme picked in the app, alphaTab drew
+black notes on the dark page; it now follows the same rule as the CSS.
+
 ## M3 results (2026-11-12)
 
 - Model I/O (checked with onnxruntime-web): input `uint8` NHWC, **BGR** channel order (oemer reads with OpenCV).

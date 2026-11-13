@@ -41,6 +41,7 @@ export const en = {
   'omr.foundTempo': 'Tempo mark: ♩ = {bpm}.',
   'omr.foundChords': 'Chord symbols read: {n}.',
   'omr.found': 'Found {notes} notes in {bars} bars ({s} s, {provider}). Check the result: recognition can make mistakes.',
+  'omr.noStaff': 'No staff lines were found. Straighten the page so the staves run level, or crop closer to the music.',
   'omr.noNotes': 'No notes could be read from this page. Try straightening it or cropping to the music.',
   'omr.buildError': 'The layers were found, but the notes could not be assembled: {msg}',
   'omr.open': 'Open in StaffLens',
